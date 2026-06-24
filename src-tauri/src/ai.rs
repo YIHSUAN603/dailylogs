@@ -29,14 +29,12 @@ pub fn run_ai(command_template: &str, prompt: &str, timeout_secs: u64) -> Result
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| {
-            format!(
-                "無法執行 '{}'：{}（請確認已安裝，或在設定頁填入完整路徑）",
-                program, e
-            )
-        })?;
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "無法執行 '{}'：{}（請確認已安裝，或在設定頁填入完整路徑）",
+            program, e
+        )
+    })?;
 
     // 寫入 prompt 後關閉 stdin（drop），讓 CLI 收到 EOF 開始處理
     {
@@ -50,8 +48,14 @@ pub fn run_ai(command_template: &str, prompt: &str, timeout_secs: u64) -> Result
     }
 
     // 另開執行緒讀 stdout/stderr 到 EOF，避免 pipe buffer 填滿導致死鎖
-    let mut stdout = child.stdout.take().ok_or_else(|| "無法讀取 AI 輸出".to_string())?;
-    let mut stderr = child.stderr.take().ok_or_else(|| "無法讀取 AI 錯誤輸出".to_string())?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "無法讀取 AI 輸出".to_string())?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "無法讀取 AI 錯誤輸出".to_string())?;
     let out_handle = thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout.read_to_end(&mut buf);
@@ -85,7 +89,10 @@ pub fn run_ai(command_template: &str, prompt: &str, timeout_secs: u64) -> Result
     let err = err_handle.join().unwrap_or_default();
 
     if !status.success() {
-        return Err(format!("AI 執行失敗：{}", String::from_utf8_lossy(&err).trim()));
+        return Err(format!(
+            "AI 執行失敗：{}",
+            String::from_utf8_lossy(&err).trim()
+        ));
     }
 
     Ok(String::from_utf8_lossy(&out).trim().to_string())
