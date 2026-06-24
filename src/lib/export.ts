@@ -122,12 +122,17 @@ export function printHtml(title: string, bodyHtml: string): void {
   }, 250);
 }
 
+/** 把 Markdown 原文轉成 HTML 後開系統列印對話框（可存成 PDF） */
+export function printMarkdown(title: string, md: string): void {
+  const html = renderToStaticMarkup(
+    createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, md),
+  );
+  printHtml(title, html);
+}
+
 /** 匯出 PDF：把 Markdown 原文轉成 HTML 後列印 */
 export function exportPdf(report: Report): void {
-  const html = renderToStaticMarkup(
-    createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, report.raw_notes),
-  );
-  printHtml(`日報_${report.date}`, html);
+  printMarkdown(`日報_${report.date}`, report.raw_notes);
 }
 
 /** 複製任意文字到剪貼簿 */

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useEffect, useState } from "react";
+import MDEditor from "@uiw/react-md-editor";
+import "@uiw/react-md-editor/markdown-editor.css";
 import {
   listReportsInRange,
   saveSummary,
@@ -101,7 +101,6 @@ export default function WeeklyView({ onClose }: Props) {
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [history, setHistory] = useState<SummaryMeta[]>([]);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
 
   const refreshHistory = async () => {
     setHistory(await listSummaries());
@@ -187,9 +186,9 @@ export default function WeeklyView({ onClose }: Props) {
   };
 
   const printPdf = () => {
-    const html = previewRef.current?.innerHTML ?? "";
     const heading = title.trim() || `工作${KIND_LABEL[kind]} ${start} ~ ${end}`;
-    exporter.printHtml(`${title.trim() || `${KIND_LABEL[kind]}_${start}_${end}`}`, `<h1>${heading}</h1>${html}`);
+    const name = title.trim() || `${KIND_LABEL[kind]}_${start}_${end}`;
+    exporter.printMarkdown(name, `# ${heading}\n\n${result}`);
   };
 
   return (
@@ -316,18 +315,14 @@ export default function WeeklyView({ onClose }: Props) {
               列印 / PDF
             </button>
           </div>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <textarea
+          <div data-color-mode="light">
+            <MDEditor
               value={result}
-              onChange={(e) => setResult(e.target.value)}
-              className="h-96 resize-y rounded-md border border-slate-300 p-3 font-mono text-sm text-slate-800 outline-none focus:border-sky-500"
+              onChange={(v) => setResult(v ?? "")}
+              height={420}
+              preview="live"
+              visibleDragbar={false}
             />
-            <div
-              ref={previewRef}
-              className="prose prose-slate h-96 max-w-none overflow-y-auto rounded-md border border-slate-200 p-3 prose-h1:text-xl prose-h2:text-base"
-            >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
-            </div>
           </div>
         </>
       )}
