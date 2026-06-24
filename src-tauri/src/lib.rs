@@ -48,3 +48,11 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sanity() {
+        assert_eq!(2 + 2, 4);
+    }
+}
