@@ -1,0 +1,67 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 專案概述
+
+日報告 DailyLogs：撰寫工作日報的桌面應用程式（Tauri 2）。降低「回想做了什麼 + 排版打字」的成本，並一鍵產出可寄送/貼上的格式化日報。前端 React 19 + TypeScript + Vite + Tailwind v4，後端 Rust，資料存本機 SQLite。
+
+## 開發指令
+
+```bash
+npm install
+npm run tauri dev      # 開發模式（啟動 vite + Rust，開視窗）
+npm run tauri build    # 打包桌面 app
+npm run build          # 僅前端：tsc 型別檢查 + vite build（驗證前端是否能編譯）
+npm run dev            # 僅 vite（瀏覽器無 Tauri API，invoke 會失敗，僅看版面用）
+```
+
+- Rust toolchain 在 `~/.cargo/bin`；非登入 shell 需 `export PATH="$HOME/.cargo/bin:$PATH"`。
+- 沒有測試框架；驗證前端改動用 `npm run build`（含 `tsc`），後端用 `cargo check`（在 `src-tauri/`）。
+
+### 在 WSLg 啟動（本機環境）
+
+WSL2 + WSLg 跑 Tauri 有兩個必踩的坑：
+
+- **必須** `export WEBKIT_DISABLE_DMABUF_RENDERER=1`（建議再加 `WEBKIT_DISABLE_COMPOSITING_MODE=1`），否則 WebKitGTK 因 GPU 渲染失敗（log 停在 `MESA: error: ZINK`）**靜默閃退、無 panic**。EGL/MESA 警告是軟體渲染的正常雜訊。
+- 用 Bash 工具的 `run_in_background:true` 啟動，**不要**加 `setsid`/`nohup`/`&`——會孤立 vite 子行程，binary 活著但 port 1420 沒人聽，視窗變空白。
+- 殺行程：binary 的 cmdline 是相對路徑，用 `pkill -9 -f "target/debug/dailylogs"`（`pkill -f "project/dailylogs"` 殺不到）。
+- 驗證成功：log 出現 `` Running `target/debug/dailylogs` `` 後，`ss -ltn | grep :1420`（vite）與 binary 行程兩者都在。
+
+## 架構
+
+### 前後端橋接
+
+前端透過 `@tauri-apps/api` 的 `invoke` 呼叫 Rust 的 `#[tauri::command]`。所有 command 在 `src-tauri/src/lib.rs` 的 `invoke_handler` 註冊；前端對應的 typed wrapper 集中在 `src/lib/api.ts`（**新增 command 時兩處都要改**）。Rust 端 command（`src-tauri/src/commands.rs`）只做薄薄一層：取 DB 鎖、轉錯誤成 `String`，再委派給 `db` / `ai` / `git` 模組。
+
+DB 連線是單一 `Connection` 包在 `Mutex` 裡，於 `lib.rs` 的 `setup` 建立並 `app.manage` 成全域 state（`DbState`）。資料庫位於系統 app data 目錄下 `dailylogs.db`。
+
+### 核心資料模型：「分類為主 + 四面向」
+
+**重要**：README 提到「四段式日報」是舊設計，現行模型是 **category-first**。一份 `Report`（一天一份，date 為 PK）含多個 `Category`，每個 Category 有名稱（專案/主題）與四個面向：`done`(完成) / `doing`(進行中) / `blockers`(問題) / `tomorrow`(明日)。四面向的定義與顯示順序集中在 `src/types.ts` 的 `ASPECTS`。
+
+面向欄位是多行字串，一行一項；`src/lib/format.ts` 的 `toItems()` 是把它拆成項目陣列的共用函式，匯出/AI 各處都靠它。
+
+DB 中 `categories` 整欄以 JSON 字串存（見 `db.rs` 的 `save_report`/`get_report`）。`db::open` 有一段針對舊四段式 schema 的 `ALTER TABLE … ADD COLUMN categories` 遷移。
+
+### AI 整合（呼叫外部 CLI）
+
+不直接呼叫 API，而是執行使用者設定的本機 CLI（預設 `claude -p`，存在 settings 表 key `ai_command`）。`src-tauri/src/ai.rs` 把命令字串以空白切成「程式 + 參數」（不經 shell，避免注入），prompt 經 **stdin** 傳入、讀 stdout。`run_ai` command 為 `async`，讓阻塞子行程跑在 Tauri 執行緒池不卡 UI。
+
+prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→日報）、`polishReport`（潤稿）、`draftFromCommits`（commit→日報）、`summarizeRange`（彙整週/月報）、`generateTags`。前四者共用 `FORMAT_RULE` 強制 AI 輸出固定的 `## 分類 / ### 面向 / - 條列` 格式，再由 `parseCategories()` 解析回 `Category[]`。**改動 `FORMAT_RULE` 必須同步檢查 `parseCategories` 的解析邏輯**，兩者是綁定的契約。
+
+### Git 整合
+
+`src-tauri/src/git.rs`：`expand_repos` 把使用者設定的路徑展開成 repo 清單（路徑本身是 repo 就直接用；是資料夾就遞迴掃描，最深 5 層、跳過 `node_modules`/`target` 等）。`collect_commits` 對每個 repo 跑 `git log` 取指定日期、指定作者的 commit 標題，單一 repo 失敗會跳過不中斷。設定存 settings 表：`git_repos`（JSON 字串陣列）、`git_author`。
+
+### 設定儲存
+
+所有設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。
+
+### 前端結構與狀態
+
+`src/App.tsx` 是唯一狀態中心：管理目前日報、清單、view 切換（`editor` / `settings` / `weekly`）。編輯採 **600ms 防抖自動存檔**（`handleChange`）；標籤變更則立即存檔。`src/components/`（Sidebar, ReportEditor）、`src/views/`（SettingsView, WeeklyView）。
+
+### 匯出
+
+`src/lib/export.ts`：剪貼簿（純文字/Markdown）、Markdown 檔、Word（用 `docx` 套件，中文字型 `Microsoft JhengHei`）、PDF（組 HTML 塞隱藏 iframe 觸發系統列印對話框）。寫檔走 Rust 的 `write_text_file`/`write_binary_file`（路徑由前端 dialog 取得）。
