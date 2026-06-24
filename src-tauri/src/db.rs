@@ -7,7 +7,7 @@ use std::path::Path;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Category {
     #[serde(default)]
-    pub project: String,  // 專案（大類）；舊資料無此欄，預設空字串
+    pub project: String, // 專案（大類）；舊資料無此欄，預設空字串
     pub name: String,     // 子分類/主題名稱
     pub done: String,     // 完成
     pub doing: String,    // 進行中
@@ -38,7 +38,7 @@ pub struct ReportMeta {
 pub struct Summary {
     #[serde(default)]
     pub id: Option<i64>, // 新建時為 None，後端 autoincrement
-    pub kind: String,    // "weekly" | "monthly" | "custom"
+    pub kind: String, // "weekly" | "monthly" | "custom"
     pub start_date: String,
     pub end_date: String,
     pub title: String,
@@ -145,17 +145,15 @@ pub fn search_reports(conn: &Connection, keyword: &str) -> rusqlite::Result<Vec<
             "SELECT rt.report_date, t.name FROM report_tags rt
              JOIN tags t ON rt.tag_id = t.id",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (date, name) = row?;
             tags_by_date.entry(date).or_default().push(name);
         }
     }
 
-    let mut stmt = conn
-        .prepare("SELECT date, status, categories, raw_notes FROM reports ORDER BY date DESC")?;
+    let mut stmt =
+        conn.prepare("SELECT date, status, categories, raw_notes FROM reports ORDER BY date DESC")?;
     let rows = stmt.query_map([], |r| {
         let categories_json: String = r.get(2)?;
         let categories: Vec<Category> = serde_json::from_str(&categories_json).unwrap_or_default();
@@ -174,7 +172,14 @@ pub fn search_reports(conn: &Connection, keyword: &str) -> rusqlite::Result<Vec<
         // 組出可搜尋片段：每個分類的非空欄位、原始記事、標籤
         let mut segments: Vec<String> = Vec::new();
         for c in &categories {
-            for field in [&c.project, &c.name, &c.done, &c.doing, &c.blockers, &c.tomorrow] {
+            for field in [
+                &c.project,
+                &c.name,
+                &c.done,
+                &c.doing,
+                &c.blockers,
+                &c.tomorrow,
+            ] {
                 if !field.trim().is_empty() {
                     segments.push(field.clone());
                 }
@@ -185,7 +190,12 @@ pub fn search_reports(conn: &Connection, keyword: &str) -> rusqlite::Result<Vec<
         }
         if let Some(tags) = tags_by_date.get(&date) {
             if !tags.is_empty() {
-                segments.push(tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "));
+                segments.push(
+                    tags.iter()
+                        .map(|t| format!("#{t}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
             }
         }
 
@@ -281,7 +291,13 @@ pub fn save_report(conn: &Connection, report: &Report) -> rusqlite::Result<Strin
          VALUES (?1, ?2, ?3, ?4, ?5, ?5)
          ON CONFLICT(date) DO UPDATE SET
             status=?2, categories=?3, raw_notes=?4, updated_at=?5",
-        rusqlite::params![report.date, report.status, categories_json, report.raw_notes, now],
+        rusqlite::params![
+            report.date,
+            report.status,
+            categories_json,
+            report.raw_notes,
+            now
+        ],
     )?;
     Ok(now)
 }
@@ -295,8 +311,10 @@ pub fn delete_report(conn: &Connection, date: &str) -> rusqlite::Result<()> {
 
 /// 讀取設定值，不存在回傳 None
 pub fn get_setting(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
-    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
-        .optional()
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+        r.get(0)
+    })
+    .optional()
 }
 
 /// 寫入設定值（upsert）
@@ -329,7 +347,8 @@ pub fn set_report_tags(conn: &Connection, date: &str, tags: &[String]) -> rusqli
             continue;
         }
         conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [name])?;
-        let id: i64 = conn.query_row("SELECT id FROM tags WHERE name = ?1", [name], |r| r.get(0))?;
+        let id: i64 =
+            conn.query_row("SELECT id FROM tags WHERE name = ?1", [name], |r| r.get(0))?;
         conn.execute(
             "INSERT OR IGNORE INTO report_tags (report_date, tag_id) VALUES (?1, ?2)",
             rusqlite::params![date, id],
@@ -480,9 +499,7 @@ fn all_report_tags(conn: &Connection) -> rusqlite::Result<HashMap<String, Vec<St
         "SELECT rt.report_date, t.name FROM report_tags rt
          JOIN tags t ON t.id = rt.tag_id ORDER BY t.name",
     )?;
-    let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-    })?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
     for row in rows {
         let (date, name) = row?;
@@ -495,9 +512,7 @@ fn all_report_tags(conn: &Connection) -> rusqlite::Result<HashMap<String, Vec<St
 fn all_settings(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
     // 排除 PAT，避免敏感 token 隨備份檔外洩
     let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE key != 'tfs_pat'")?;
-    let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-    })?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     rows.collect()
 }
 

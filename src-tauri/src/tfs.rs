@@ -89,7 +89,10 @@ async fn list_repositories(
             resp.status()
         ));
     }
-    let parsed: ReposResp = resp.json().await.map_err(|e| format!("解析 repo 清單失敗：{e}"))?;
+    let parsed: ReposResp = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 repo 清單失敗：{e}"))?;
     Ok(parsed.value)
 }
 
@@ -119,9 +122,11 @@ async fn fetch_repo_commits(
         .send()
         .await;
     match resp {
-        Ok(r) if r.status().is_success() => {
-            r.json::<CommitsResp>().await.map(|c| c.value).unwrap_or_default()
-        }
+        Ok(r) if r.status().is_success() => r
+            .json::<CommitsResp>()
+            .await
+            .map(|c| c.value)
+            .unwrap_or_default(),
         _ => Vec::new(),
     }
 }
@@ -138,8 +143,8 @@ pub async fn count_repos(cfg: &TfsConfig) -> Result<usize, String> {
 
 /// 掃描所有 collection 的 repo，取出指定日期（當地時間）該作者的 commit 標題。
 pub async fn collect_commits(cfg: &TfsConfig, date: &str) -> Result<Vec<RepoCommits>, String> {
-    let target = NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map_err(|_| format!("日期格式錯誤：{date}"))?;
+    let target =
+        NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| format!("日期格式錯誤：{date}"))?;
     // 拉寬到目標日 ±1 天（UTC），再用本機時區精準濾出當天，避開時區邊界
     let from = format!("{}T00:00:00Z", target.pred_opt().unwrap_or(target));
     let to = format!("{}T00:00:00Z", target.succ_opt().unwrap_or(target));

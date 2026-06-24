@@ -35,7 +35,10 @@ pub fn get_report(state: State<DbState>, date: String) -> Result<Option<Report>,
 }
 
 #[tauri::command]
-pub fn search_reports(state: State<DbState>, keyword: String) -> Result<Vec<db::SearchHit>, String> {
+pub fn search_reports(
+    state: State<DbState>,
+    keyword: String,
+) -> Result<Vec<db::SearchHit>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::search_reports(&conn, &keyword).map_err(|e| e.to_string())
 }
@@ -116,7 +119,8 @@ pub fn export_all(state: State<DbState>) -> Result<String, String> {
 /// 從 JSON 字串匯入資料（以日期 upsert 合併），回傳匯入的日報份數
 #[tauri::command]
 pub fn import_all(state: State<DbState>, json: String) -> Result<usize, String> {
-    let bundle: db::ExportBundle = serde_json::from_str(&json).map_err(|e| format!("檔案格式不符：{}", e))?;
+    let bundle: db::ExportBundle =
+        serde_json::from_str(&json).map_err(|e| format!("檔案格式不符：{}", e))?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::import_data(&conn, &bundle).map_err(|e| e.to_string())
 }
@@ -173,7 +177,8 @@ fn load_tfs_config(state: &State<DbState>) -> Result<TfsConfig, String> {
     let base_url = db::get_setting(&conn, TFS_BASE_URL_KEY)
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
-    let collections_json = db::get_setting(&conn, TFS_COLLECTIONS_KEY).map_err(|e| e.to_string())?;
+    let collections_json =
+        db::get_setting(&conn, TFS_COLLECTIONS_KEY).map_err(|e| e.to_string())?;
     let pat = db::get_setting(&conn, TFS_PAT_KEY)
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
@@ -211,7 +216,10 @@ fn load_tfs_config(state: &State<DbState>) -> Result<TfsConfig, String> {
 
 /// 從 TFS 撈指定日期該作者的 commit，回傳組好的文字。沒有任何 commit 時回傳空字串。
 #[tauri::command]
-pub async fn git_collect_commits(state: State<'_, DbState>, date: String) -> Result<String, String> {
+pub async fn git_collect_commits(
+    state: State<'_, DbState>,
+    date: String,
+) -> Result<String, String> {
     let cfg = load_tfs_config(&state)?;
     let collected = tfs::collect_commits(&cfg, &date).await?;
     Ok(tfs::format_commits(&collected))
