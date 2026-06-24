@@ -36,19 +36,21 @@ WSL2 + WSLg 跑 Tauri 有兩個必踩的坑：
 
 DB 連線是單一 `Connection` 包在 `Mutex` 裡，於 `lib.rs` 的 `setup` 建立並 `app.manage` 成全域 state（`DbState`）。資料庫位於系統 app data 目錄下 `dailylogs.db`。
 
-### 核心資料模型：「分類為主 + 四面向」
+### 核心資料模型：自由 Markdown（`raw_notes` 為準）
 
-**重要**：README 提到「四段式日報」是舊設計，現行模型是 **category-first**。一份 `Report`（一天一份，date 為 PK）含多個 `Category`，每個 Category 有名稱（專案/主題）與四個面向：`done`(完成) / `doing`(進行中) / `blockers`(問題) / `tomorrow`(明日)。四面向的定義與顯示順序集中在 `src/types.ts` 的 `ASPECTS`。
+**重要**：歷史上曾有「四段式日報」→「category-first 分類為主 + 四面向」兩代設計，**現行模型是自由 Markdown**。一份 `Report`（一天一份，date 為 PK）的內容就是 `raw_notes` 這個 Markdown 字串，是**唯一內容來源**；編輯、匯出、AI、週報彙整全部讀它。使用者可自由使用任意 Markdown 語法（標題、清單、表格、程式碼…），不再被固定結構強制。
 
-面向欄位是多行字串，一行一項；`src/lib/format.ts` 的 `toItems()` 是把它拆成項目陣列的共用函式，匯出/AI 各處都靠它。
+`Category[]` / `ASPECTS`（`src/types.ts`）與 `db.rs` 的 `categories` JSON 欄位**仍存在但已退場**：DB 欄位保留只存空陣列（未改 Rust，避免 schema 遷移），前端不再用它承載內容。唯一還用到 `categories` 的地方是 `src/lib/format.ts` 的 `reportToEditableText()`——把**舊資料**（只有 categories、raw_notes 空）開啟時一次性轉成 Markdown 寫回 `raw_notes`（見 `ReportEditor.tsx` 的遷移 effect）。`format.ts` 的 `toItems()`/`groupByProject()`/`hasContent()` 目前只服務這條遷移路徑。
 
-DB 中 `categories` 整欄以 JSON 字串存（見 `db.rs` 的 `save_report`/`get_report`）。`db::open` 有一段針對舊四段式 schema 的 `ALTER TABLE … ADD COLUMN categories` 遷移。
+`format.ts` 另提供 `markdownToPlain()`：把 Markdown 去掉標題井號/清單符號/行內粗體，給通訊軟體貼上。
 
 ### AI 整合（呼叫外部 CLI）
 
 不直接呼叫 API，而是執行使用者設定的本機 CLI（預設 `claude -p`，存在 settings 表 key `ai_command`）。`src-tauri/src/ai.rs` 把命令字串以空白切成「程式 + 參數」（不經 shell，避免注入），prompt 經 **stdin** 傳入、讀 stdout。`run_ai` command 為 `async`，讓阻塞子行程跑在 Tauri 執行緒池不卡 UI。
 
-prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→日報）、`polishReport`（潤稿）、`draftFromCommits`（commit→日報）、`summarizeRange`（彙整週/月報）、`generateTags`。前四者共用 `FORMAT_RULE` 強制 AI 輸出固定的 `## 分類 / ### 面向 / - 條列` 格式，再由 `parseCategories()` 解析回 `Category[]`。**改動 `FORMAT_RULE` 必須同步檢查 `parseCategories` 的解析邏輯**，兩者是綁定的契約。
+prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→日報）、`polishReport`（潤稿）、`summarizeRange`（彙整週/月報）、`generateTags`。`organizeReport`/`polishReport` 共用 `FORMAT_RULE` 建議 AI 輸出 `# 專案 / ## 子分類 / ### 面向 / - 條列` 的排版，但**直接回傳 Markdown 文字**寫回 `raw_notes`（使用者可再自由編輯），不再解析成結構。`summarizeRange`/`generateTags` 也直接吃 `raw_notes`。
+
+（舊版的 `parseCategories()` 解析、`draftFromCommits` 已移除；現在 FORMAT_RULE 只是排版建議，沒有「解析回 Category」的綁定契約。）
 
 ### Git 整合
 
@@ -60,8 +62,8 @@ prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→�
 
 ### 前端結構與狀態
 
-`src/App.tsx` 是唯一狀態中心：管理目前日報、清單、view 切換（`editor` / `settings` / `weekly`）。編輯採 **600ms 防抖自動存檔**（`handleChange`）；標籤變更則立即存檔。`src/components/`（Sidebar, ReportEditor）、`src/views/`（SettingsView, WeeklyView）。
+`src/App.tsx` 是唯一狀態中心：管理目前日報、清單、view 切換（`editor` / `settings` / `weekly`）。編輯採 **600ms 防抖自動存檔**（`handleChange`）；標籤變更則立即存檔。`ReportEditor.tsx` 用 `@uiw/react-md-editor`（內建工具列 / 並排即時預覽 / Tab 縮排 / Enter 接清單），onChange 只更新 `raw_notes`。`src/components/`（Sidebar, ReportEditor）、`src/views/`（SettingsView, WeeklyView）。
 
 ### 匯出
 
-`src/lib/export.ts`：剪貼簿（純文字/Markdown）、Markdown 檔、Word（用 `docx` 套件，中文字型 `Microsoft JhengHei`）、PDF（組 HTML 塞隱藏 iframe 觸發系統列印對話框）。寫檔走 Rust 的 `write_text_file`/`write_binary_file`（路徑由前端 dialog 取得）。
+`src/lib/export.ts`：全部以 `raw_notes` 的 **Markdown 原文**為來源直接呈現——剪貼簿 Markdown / 存 .md = 原文；純文字 = `markdownToPlain()`；Word = 逐行把 Markdown 轉成 `docx` 段落（中文字型 `Microsoft JhengHei`）；PDF = 用 `react-dom/server` 的 `renderToStaticMarkup` 把 `<ReactMarkdown remarkPlugins={[remarkGfm]}>` 算成 HTML，再塞隱藏 iframe 觸發系統列印對話框。寫檔走 Rust 的 `write_text_file`/`write_binary_file`（路徑由前端 dialog 取得）。

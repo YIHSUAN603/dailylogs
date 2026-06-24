@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
-import ReactMarkdown from "react-markdown";
+import MDEditor from "@uiw/react-md-editor";
+import "@uiw/react-md-editor/markdown-editor.css";
 import type { Report } from "../types";
-import { reportToEditableText, reportToMarkdown } from "../lib/format";
+import { reportToEditableText, dedupeCommits } from "../lib/format";
 import * as exporter from "../lib/export";
 import * as ai from "../lib/ai";
 import * as api from "../lib/api";
@@ -19,7 +20,15 @@ interface Props {
 export default function ReportEditor({ report, saving, tags, onChange, onTagsChange, onDelete }: Props) {
   const [toast, setToast] = useState("");
   const [aiBusy, setAiBusy] = useState("");
-  const [showPreview, setShowPreview] = useState(false);
+
+  // 舊資料相容：raw_notes 空但有 categories 時，把結構化內容轉成 Markdown 一次性遷移
+  useEffect(() => {
+    if (!report.raw_notes.trim() && report.categories.length > 0) {
+      onChange({ raw_notes: reportToEditableText(report) });
+    }
+    // 僅在切換日報時觸發一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report.date]);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -47,9 +56,6 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
     }
   };
 
-  // 文字框內容：相容舊資料（raw_notes 空但有 categories）做懶遷移
-  const editText = report.raw_notes.trim() ? report.raw_notes : reportToEditableText(report);
-
   return (
     <div className="flex h-full flex-col">
       {/* 標頭 */}
@@ -69,12 +75,6 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
             />
             標記完成
           </label>
-          <button
-            onClick={() => setShowPreview((v) => !v)}
-            className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-100"
-          >
-            {showPreview ? "編輯" : "預覽"}
-          </button>
           <button
             onClick={async () => {
               const ok = await ask(`確定刪除 ${report.date} 的日報？此動作無法復原。`, {
@@ -103,8 +103,7 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
           disabled={!!aiBusy}
           onClick={runAi("整理成正式報告", async () => {
             if (!report.raw_notes.trim()) throw new Error("內容是空的，先寫點東西");
-            const categories = await ai.organizeReport(report);
-            onChange({ categories, raw_notes: reportToEditableText({ ...report, categories }) });
+            onChange({ raw_notes: await ai.organizeReport(report) });
           })}
         >
           整理成正式報告
@@ -113,8 +112,8 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
           accent
           disabled={!!aiBusy}
           onClick={runAi("潤稿", async () => {
-            const categories = await ai.polishReport(report);
-            onChange({ categories, raw_notes: reportToEditableText({ ...report, categories }) });
+            if (!report.raw_notes.trim()) throw new Error("內容是空的，先寫點東西");
+            onChange({ raw_notes: await ai.polishReport(report) });
           })}
         >
           潤稿
@@ -132,7 +131,14 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
           onClick={runAi("從 Git 草擬", async () => {
             const commits = await api.gitCollectCommits(report.date);
             if (!commits) throw new Error("今天沒有符合的 commit");
-            onChange({ raw_notes: commits });
+            const existing = report.raw_notes.trimEnd();
+            if (!existing) {
+              onChange({ raw_notes: commits });
+              return;
+            }
+            const fresh = dedupeCommits(existing, commits);
+            if (!fresh) throw new Error("沒有新的 commit（都已加入）");
+            onChange({ raw_notes: `${existing}\n\n${fresh}` });
           })}
         >
           從 Git 草擬
@@ -163,23 +169,19 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
         </div>
       )}
 
-      {/* 內容區 */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {showPreview ? (
-          <article className="prose prose-slate max-w-none prose-headings:font-bold prose-h1:text-xl prose-h2:text-base">
-            <ReactMarkdown>{reportToMarkdown(report)}</ReactMarkdown>
-          </article>
-        ) : (
-          <textarea
-            value={editText}
-            placeholder="直接寫今天做了什麼、遇到什麼問題、明天要做什麼…
-再按上方『整理成正式報告』，即可整理成 # 專案 / ## 子分類 / ### 面向 / - 條列 格式並繼續編輯。"
-            onChange={(e) =>
-              onChange({ raw_notes: e.target.value, categories: ai.parseCategories(e.target.value) })
-            }
-            className="h-full w-full resize-none rounded-md border border-slate-200 px-4 py-3 text-sm leading-relaxed text-slate-800 outline-none focus:border-sky-400"
-          />
-        )}
+      {/* 內容區：Markdown 編輯器（工具列 + 並排即時預覽） */}
+      <div className="flex-1 overflow-hidden px-6 py-4" data-color-mode="light">
+        <MDEditor
+          value={report.raw_notes}
+          onChange={(v) => onChange({ raw_notes: v ?? "" })}
+          height="100%"
+          preview="live"
+          visibleDragbar={false}
+          textareaProps={{
+            placeholder:
+              "直接用 Markdown 寫今天做了什麼、遇到什麼問題、明天要做什麼…\n可自由使用標題、清單、表格等語法；右側即時預覽。",
+          }}
+        />
       </div>
     </div>
   );

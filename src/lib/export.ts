@@ -2,29 +2,23 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Document, Packer, Paragraph, HeadingLevel, TextRun } from "docx";
-import { ASPECTS, type Category, type Report } from "../types";
-import { groupByProject, reportToMarkdown, reportToPlainText, toItems } from "./format";
-
-/** 分類中有內容的面向 */
-function filledAspects(c: Category) {
-  return ASPECTS.filter((a) => toItems(c[a.key]).length > 0);
-}
-
-/** 分類是否有任何內容 */
-function hasContent(c: Category): boolean {
-  return !!(c.name.trim() || filledAspects(c).length);
-}
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { type Report } from "../types";
+import { markdownToPlain } from "./format";
 
 const CJK_FONT = "Microsoft JhengHei";
 
 /** 複製純文字到剪貼簿（給通訊軟體貼上） */
 export async function copyPlainText(report: Report): Promise<void> {
-  await writeText(reportToPlainText(report));
+  await writeText(markdownToPlain(report.raw_notes));
 }
 
 /** 複製 Markdown 到剪貼簿 */
 export async function copyMarkdown(report: Report): Promise<void> {
-  await writeText(reportToMarkdown(report));
+  await writeText(report.raw_notes);
 }
 
 /** 匯出 Markdown 檔 */
@@ -34,59 +28,56 @@ export async function exportMarkdown(report: Report): Promise<boolean> {
     filters: [{ name: "Markdown", extensions: ["md"] }],
   });
   if (!path) return false;
-  await invoke("write_text_file", { path, contents: reportToMarkdown(report) });
+  await invoke("write_text_file", { path, contents: report.raw_notes });
   return true;
 }
 
-/** 匯出 Word (.docx) */
-export async function exportDocx(report: Report): Promise<boolean> {
-  const children: Paragraph[] = [
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      children: [new TextRun({ text: `工作日報 ${report.date}`, font: CJK_FONT, bold: true })],
-    }),
-  ];
+const HEADINGS = [
+  HeadingLevel.HEADING_1,
+  HeadingLevel.HEADING_2,
+  HeadingLevel.HEADING_3,
+  HeadingLevel.HEADING_4,
+  HeadingLevel.HEADING_5,
+  HeadingLevel.HEADING_6,
+];
 
-  for (const g of groupByProject(report.categories)) {
-    const cats = g.cats.filter(hasContent);
-    if (cats.length === 0) continue;
-    if (g.name) {
-      children.push(
-        new Paragraph({
-          heading: HeadingLevel.HEADING_2,
-          children: [new TextRun({ text: g.name, font: CJK_FONT, bold: true })],
-        }),
+/** 把一行 Markdown 行內語法（**粗體**）拆成 docx TextRun[] */
+function inlineRuns(text: string): TextRun[] {
+  return text
+    .split(/(\*\*.+?\*\*)/g)
+    .filter(Boolean)
+    .map((part) => {
+      const bold = part.startsWith("**") && part.endsWith("**");
+      return new TextRun({ text: bold ? part.slice(2, -2) : part, font: CJK_FONT, bold });
+    });
+}
+
+/** 把 Markdown 原文逐行轉成 docx 段落 */
+function markdownToParagraphs(md: string): Paragraph[] {
+  const paras: Paragraph[] = [];
+  for (const raw of md.split("\n")) {
+    const heading = raw.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      paras.push(
+        new Paragraph({ heading: HEADINGS[heading[1].length - 1], children: inlineRuns(heading[2]) }),
       );
+      continue;
     }
-    const subHeading = g.name ? HeadingLevel.HEADING_3 : HeadingLevel.HEADING_2;
-    for (const c of cats) {
-      children.push(
-        new Paragraph({
-          heading: subHeading,
-          children: [
-            new TextRun({ text: c.name.trim() || "未命名分類", font: CJK_FONT, bold: true }),
-          ],
-        }),
+    const bullet = raw.match(/^(\s*)[-*]\s+(.*)$/);
+    if (bullet) {
+      paras.push(
+        new Paragraph({ bullet: { level: Math.floor(bullet[1].length / 2) }, children: inlineRuns(bullet[2]) }),
       );
-      for (const a of filledAspects(c)) {
-        children.push(
-          new Paragraph({
-            children: [new TextRun({ text: a.label, font: CJK_FONT, bold: true })],
-          }),
-        );
-        for (const item of toItems(c[a.key])) {
-          children.push(
-            new Paragraph({
-              bullet: { level: 0 },
-              children: [new TextRun({ text: item, font: CJK_FONT })],
-            }),
-          );
-        }
-      }
+      continue;
     }
+    if (raw.trim()) paras.push(new Paragraph({ children: inlineRuns(raw) }));
   }
+  return paras;
+}
 
-  const doc = new Document({ sections: [{ children }] });
+/** 匯出 Word (.docx)：由 Markdown 原文產生 */
+export async function exportDocx(report: Report): Promise<boolean> {
+  const doc = new Document({ sections: [{ children: markdownToParagraphs(report.raw_notes) }] });
   const blob = await Packer.toBlob(doc);
   const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
 
@@ -131,32 +122,12 @@ export function printHtml(title: string, bodyHtml: string): void {
   }, 250);
 }
 
-/** 匯出 PDF：把日報組成 HTML 後列印 */
+/** 匯出 PDF：把 Markdown 原文轉成 HTML 後列印 */
 export function exportPdf(report: Report): void {
-  const sections = groupByProject(report.categories)
-    .map((g) => {
-      const cats = g.cats.filter(hasContent);
-      if (cats.length === 0) return "";
-      // 有專案：子分類 h3、面向 h4；無專案：子分類 h2、面向 h3（維持舊樣）
-      const subTag = g.name ? "h3" : "h2";
-      const aspectTag = g.name ? "h4" : "h3";
-      const body = cats
-        .map((c) => {
-          const aspects = filledAspects(c)
-            .map((a) => {
-              const items = toItems(c[a.key])
-                .map((it) => `<li>${escapeHtml(it)}</li>`)
-                .join("");
-              return `<${aspectTag}>${a.label}</${aspectTag}><ul>${items}</ul>`;
-            })
-            .join("");
-          return `<${subTag}>${escapeHtml(c.name.trim() || "未命名分類")}</${subTag}>${aspects}`;
-        })
-        .join("");
-      return g.name ? `<h2>${escapeHtml(g.name)}</h2>${body}` : body;
-    })
-    .join("");
-  printHtml(`日報_${report.date}`, `<h1>工作日報 ${report.date}</h1>${sections}`);
+  const html = renderToStaticMarkup(
+    createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, report.raw_notes),
+  );
+  printHtml(`日報_${report.date}`, html);
 }
 
 /** 複製任意文字到剪貼簿 */
@@ -173,11 +144,4 @@ export async function saveMarkdownText(text: string, defaultName: string): Promi
   if (!path) return false;
   await invoke("write_text_file", { path, contents: text });
   return true;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }

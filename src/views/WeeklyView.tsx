@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   listReportsInRange,
   saveSummary,
@@ -325,7 +326,7 @@ export default function WeeklyView({ onClose }: Props) {
               ref={previewRef}
               className="prose prose-slate h-96 max-w-none overflow-y-auto rounded-md border border-slate-200 p-3 prose-h1:text-xl prose-h2:text-base"
             >
-              <ReactMarkdown>{result}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
             </div>
           </div>
         </>
