@@ -2,13 +2,14 @@
 
 撰寫工作日報的桌面應用程式。核心目標：降低「每天回想做了什麼 + 排版打字」的成本，並能一鍵產出可寄送/貼上的格式化日報。
 
-## 功能（規劃）
+## 功能
 
-- **四段式日報**：今日完成事項 / 進行中 / 遇到的問題 / 明日計劃
-- **本機儲存**：SQLite，一天一份，自動存草稿
-- **AI 協助**：零散記事 → 正式日報、潤稿、自動下標籤、日報彙整成週報（呼叫本機 `claude` CLI）
-- **Git 整合**：掃指定 repo 當天 commit，AI 草擬日報
-- **輸出**：複製到剪貼簿、Markdown、PDF、Word
+- **自由 Markdown 日報**：一天一份，內容即一段 Markdown，並排即時預覽，可自由用標題／清單／表格
+- **本機儲存**：SQLite，自動存草稿（停筆約 0.6 秒），可標記完成
+- **AI 協助**：零散記事 → 正式日報、潤稿、自動下標籤、日報彙整成週／月報（呼叫本機可設定的 CLI，預設 `claude -p`）
+- **TFS 整合**：經 Azure DevOps REST API 抓指定 collection／作者當天的 commit，草擬進日報
+- **輸出**：複製純文字、複製 Markdown、存 .md、存 Word、列印 / PDF
+- **資料備份**：全部資料匯出／匯入 JSON（PAT 不含在備份內）
 
 ## 技術
 
@@ -72,12 +73,15 @@ npm run tauri build
 
 ```
 src/                  前端（React）
-  components/         Sidebar, ReportEditor, SectionField
-  lib/                api（呼叫 Rust）、format（Markdown/純文字）
-  types.ts            Report 型別與四段式定義
+  components/         Sidebar, ReportEditor, DatePicker, ErrorBoundary
+  views/              SettingsView, WeeklyView
+  lib/                api（呼叫 Rust）、ai（prompt 工程）、format（Markdown/純文字）、export（各格式輸出）
+  types.ts            Report 型別等
 src-tauri/src/
   db.rs               SQLite 結構與 CRUD
   commands.rs         #[tauri::command] 對前端的 API
+  ai.rs               執行外部 AI CLI（prompt 經 stdin）
+  tfs.rs              Azure DevOps REST API 取 commit
   lib.rs              app 進入點、DB 初始化
 ```
 
