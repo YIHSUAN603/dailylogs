@@ -35,28 +35,17 @@ export function groupByProject(cats: Category[]): { name: string; cats: Category
   return groups;
 }
 
-/** 日報 → Markdown（專案 > 子分類 > 面向）。標題 #、專案 ##、子分類 ###、面向粗體 */
-export function reportToMarkdown(report: Report): string {
-  const lines: string[] = [`# 工作日報 ${report.date}`, ""];
-  for (const g of groupByProject(report.categories)) {
-    const cats = g.cats.filter(hasContent);
-    if (cats.length === 0) continue;
-    const sub = g.name ? "###" : "##"; // 有專案才縮一層
-    if (g.name) lines.push(`## ${g.name}`, "");
-    for (const c of cats) {
-      lines.push(`${sub} ${c.name.trim() || "未命名分類"}`, "");
-      for (const a of ASPECTS) {
-        const items = toItems(c[a.key]);
-        if (items.length === 0) continue;
-        lines.push(`**${a.label}**`);
-        lines.push(...items.map((it) => `- ${it}`), "");
-      }
-    }
-  }
-  return lines.join("\n").trim() + "\n";
+/** Markdown → 純文字（給通訊軟體貼上）：去標題 #、清單符號、行內粗體，保留文字與縮排 */
+export function markdownToPlain(md: string): string {
+  return md
+    .split("\n")
+    .map((l) => l.replace(/^(\s*)#{1,6}\s+/, "$1").replace(/^(\s*)[-*]\s+/, "$1• "))
+    .join("\n")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .trim();
 }
 
-/** 日報 → 可編輯文字（# 專案 / ## 子分類 / ### 面向 / - 條列，與 parseCategories 互為逆轉換） */
+/** 日報 → 可編輯文字（# 專案 / ## 子分類 / ### 面向 / - 條列）。供舊 categories 資料遷移為 Markdown 用 */
 export function reportToEditableText(report: Report): string {
   const lines: string[] = [];
   for (const g of groupByProject(report.categories)) {
@@ -76,23 +65,36 @@ export function reportToEditableText(report: Report): string {
   return lines.join("\n").trim() + "\n";
 }
 
-/** 日報 → 純文字（給通訊軟體貼上）。專案 ◆、子分類 ▸、面向 [標籤] */
-export function reportToPlainText(report: Report): string {
-  const lines: string[] = [`【工作日報 ${report.date}】`, ""];
-  for (const g of groupByProject(report.categories)) {
-    const cats = g.cats.filter(hasContent);
-    if (cats.length === 0) continue;
-    if (g.name) lines.push(`◆ ${g.name}`);
-    for (const c of cats) {
-      lines.push(g.name ? `  ▸ ${c.name.trim() || "未命名分類"}` : `◆ ${c.name.trim() || "未命名分類"}`);
-      for (const a of ASPECTS) {
-        const items = toItems(c[a.key]);
-        if (items.length === 0) continue;
-        lines.push(`[${a.label}]`);
-        lines.push(...items.map((it) => `  - ${it}`));
+/**
+ * 從 commits 區塊（[repo] 標頭 + "- 標題" 條列）中，
+ * 去掉「條列文字已出現在 existing 內任一 "- " 條列」的項目。
+ * 某 [repo] 底下全被去除時連標頭一起略過。沒有新項目時回傳空字串。
+ */
+export function dedupeCommits(existing: string, commits: string): string {
+  const seen = new Set(
+    existing
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("- "))
+      .map((l) => l.slice(2).trim()),
+  );
+  const out: string[] = [];
+  let pendingHeader: string | null = null;
+  for (const line of commits.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("[") && t.endsWith("]")) {
+      pendingHeader = line; // 標頭暫存，底下有新 commit 才寫入
+    } else if (t.startsWith("- ")) {
+      const body = t.slice(2).trim();
+      if (seen.has(body)) continue; // 已存在 → 跳過
+      seen.add(body); // 同次附加內也不重覆
+      if (pendingHeader !== null) {
+        if (out.length > 0) out.push(""); // 段落間空行，維持 format_commits 排版
+        out.push(pendingHeader);
+        pendingHeader = null;
       }
+      out.push(line);
     }
-    lines.push("");
   }
-  return lines.join("\n").trim();
+  return out.join("\n");
 }
