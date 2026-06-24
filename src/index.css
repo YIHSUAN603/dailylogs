@@ -11,3 +11,13 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* Tailwind Preflight 會把 ul/ol 的 list-style 清成 none，
+   而 react-md-editor 預覽的最上層清單未自帶 list-style-type，
+   會跟著消失。在此補回最上層的項目符號 / 編號。 */
+.wmde-markdown ul {
+  list-style-type: disc;
+}
+.wmde-markdown ol {
+  list-style-type: decimal;
+}
