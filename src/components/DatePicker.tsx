@@ -65,32 +65,32 @@ export default function DatePicker({ value, onChange }: Props) {
       <button
         type="button"
         onClick={toggle}
-        className="w-32 rounded-md border border-slate-300 px-2.5 py-1.5 text-left text-sm text-slate-800 outline-none hover:border-sky-500 focus:border-sky-500"
+        className="w-32 rounded-md border border-slate-300 px-2.5 py-1.5 text-left text-sm text-slate-800 outline-none hover:border-accent-500 focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
       >
         {value || "選擇日期"}
       </button>
       {open && (
-        <div className="absolute z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+        <div className="absolute z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-800">
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"
               onClick={() => setView(new Date(year, month - 1, 1))}
-              className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100"
+              className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
               ‹
             </button>
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {year} 年 {month + 1} 月
             </span>
             <button
               type="button"
               onClick={() => setView(new Date(year, month + 1, 1))}
-              className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100"
+              className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
               ›
             </button>
           </div>
-          <div className="grid grid-cols-7 gap-0.5 text-center text-xs text-slate-400">
+          <div className="grid grid-cols-7 gap-0.5 text-center text-xs text-slate-400 dark:text-slate-500">
             {WEEKDAYS.map((w) => (
               <div key={w} className="py-1">
                 {w}
@@ -112,8 +112,8 @@ export default function DatePicker({ value, onChange }: Props) {
                   }}
                   className={`rounded py-1 ${
                     isSelected
-                      ? "bg-sky-600 text-white"
-                      : "text-slate-700 hover:bg-sky-100"
+                      ? "bg-accent-600 text-white"
+                      : "text-slate-700 hover:bg-accent-100 dark:text-slate-300 dark:hover:bg-accent-900/40"
                   }`}
                 >
                   {d}

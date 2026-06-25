@@ -12,12 +12,13 @@ interface Props {
   report: Report;
   saving: boolean;
   tags: string[];
+  dark: boolean;
   onChange: (patch: Partial<Report>) => void;
   onTagsChange: (tags: string[]) => void;
   onDelete: (date: string) => Promise<void>;
 }
 
-export default function ReportEditor({ report, saving, tags, onChange, onTagsChange, onDelete }: Props) {
+export default function ReportEditor({ report, saving, tags, dark, onChange, onTagsChange, onDelete }: Props) {
   const [toast, setToast] = useState("");
   const [aiBusy, setAiBusy] = useState("");
 
@@ -59,15 +60,15 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
   return (
     <div className="flex h-full flex-col">
       {/* 標頭 */}
-      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
+      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-3 dark:border-slate-700">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold text-slate-800">{report.date}</h2>
-          <span className="text-xs text-slate-400">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">{report.date}</h2>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
             {saving ? "儲存中…" : report.updated_at ? `已儲存 ${report.updated_at}` : ""}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          <label className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
             <input
               type="checkbox"
               checked={report.status === "final"}
@@ -88,7 +89,7 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
                 flash(`刪除失敗：${e}`);
               }
             }}
-            className="rounded-md border border-rose-300 px-3 py-1 text-sm text-rose-600 hover:bg-rose-50"
+            className="rounded-md border border-rose-300 px-3 py-1 text-sm text-rose-600 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/40"
           >
             刪除
           </button>
@@ -96,8 +97,8 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
       </div>
 
       {/* 工具列：AI + 輸出 */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-6 py-2">
-        <span className="text-xs text-slate-400">AI：</span>
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-6 py-2 dark:border-slate-700 dark:bg-slate-800">
+        <span className="text-xs text-slate-400 dark:text-slate-500">AI：</span>
         <ToolBtn
           accent
           disabled={!!aiBusy}
@@ -144,24 +145,24 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
           從 Git 草擬
         </ToolBtn>
 
-        <span className="ml-3 text-xs text-slate-400">輸出：</span>
+        <span className="ml-3 text-xs text-slate-400 dark:text-slate-500">輸出：</span>
         <ToolBtn onClick={run(() => exporter.copyPlainText(report), "已複製純文字")}>複製文字</ToolBtn>
         <ToolBtn onClick={run(() => exporter.copyMarkdown(report), "已複製 Markdown")}>複製 MD</ToolBtn>
         <ToolBtn onClick={run(() => exporter.exportMarkdown(report), "已匯出 Markdown")}>存 .md</ToolBtn>
         <ToolBtn onClick={run(() => exporter.exportDocx(report), "已匯出 Word")}>存 Word</ToolBtn>
         <ToolBtn onClick={run(() => exporter.exportPdf(report), "已開啟列印")}>列印 / PDF</ToolBtn>
 
-        {aiBusy && <span className="ml-2 text-xs font-medium text-sky-600">AI 處理中：{aiBusy}…</span>}
-        {toast && <span className="ml-2 text-xs font-medium text-emerald-600">{toast}</span>}
+        {aiBusy && <span className="ml-2 text-xs font-medium text-accent-600 dark:text-accent-400">AI 處理中：{aiBusy}…</span>}
+        {toast && <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">{toast}</span>}
       </div>
 
       {/* 標籤列 */}
       {tags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-6 py-2">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-6 py-2 dark:border-slate-700">
           {tags.map((t) => (
             <span
               key={t}
-              className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
+              className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
             >
               #{t}
             </span>
@@ -170,7 +171,7 @@ export default function ReportEditor({ report, saving, tags, onChange, onTagsCha
       )}
 
       {/* 內容區：Markdown 編輯器（工具列 + 並排即時預覽） */}
-      <div className="flex-1 overflow-hidden px-6 py-4" data-color-mode="light">
+      <div className="flex-1 overflow-hidden px-6 py-4" data-color-mode={dark ? "dark" : "light"}>
         <MDEditor
           value={report.raw_notes}
           onChange={(v) => onChange({ raw_notes: v ?? "" })}
@@ -204,8 +205,8 @@ function ToolBtn({
       disabled={disabled}
       className={`rounded border px-2.5 py-1 text-xs disabled:opacity-50 ${
         accent
-          ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
-          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+          ? "border-accent-300 bg-accent-50 text-accent-700 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/30 dark:text-accent-300 dark:hover:bg-accent-900/50"
+          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
       }`}
     >
       {children}

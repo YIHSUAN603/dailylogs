@@ -6,6 +6,17 @@ import WeeklyView from "./views/WeeklyView";
 import { emptyReport, type Report, type ReportMeta, type SearchHit } from "./types";
 import { todayStr } from "./lib/format";
 import * as api from "./lib/api";
+import {
+  DEFAULT_ACCENT,
+  DEFAULT_MODE,
+  applyAccent,
+  applyMode,
+  isAccentName,
+  isThemeMode,
+  resolveMode,
+  type AccentName,
+  type ThemeMode,
+} from "./lib/theme";
 
 export default function App() {
   const [reports, setReports] = useState<ReportMeta[]>([]);
@@ -16,6 +27,9 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [error, setError] = useState("");
+  const [accent, setAccent] = useState<AccentName>(DEFAULT_ACCENT);
+  const [mode, setMode] = useState<ThemeMode>(DEFAULT_MODE);
+  const [dark, setDark] = useState(false); // 解析後的實際深淺（system 依系統偏好）
   const saveTimer = useRef<number | null>(null);
 
   const refreshList = useCallback(async () => {
@@ -45,6 +59,43 @@ export default function App() {
       await openDate(todayStr());
     })();
   }, [refreshList, openDate]);
+
+  // 初次載入：套用已存的主題設定（主色 + 模式；模式的套用交給下方 effect）
+  useEffect(() => {
+    (async () => {
+      const savedAccent = await api.getSetting(api.THEME_ACCENT_KEY);
+      const savedMode = await api.getSetting(api.THEME_MODE_KEY);
+      const a = isAccentName(savedAccent) ? savedAccent : DEFAULT_ACCENT;
+      setAccent(a);
+      applyAccent(a);
+      setMode(isThemeMode(savedMode) ? savedMode : DEFAULT_MODE);
+    })();
+  }, []);
+
+  // 套用模式並解析實際深淺；mode 為 system 時跟隨系統偏好變化
+  useEffect(() => {
+    applyMode(mode);
+    setDark(resolveMode(mode) === "dark");
+    if (mode !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      applyMode("system");
+      setDark(mq.matches);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [mode]);
+
+  const changeAccent = useCallback((name: AccentName) => {
+    setAccent(name);
+    applyAccent(name);
+    api.setSetting(api.THEME_ACCENT_KEY, name);
+  }, []);
+
+  const changeMode = useCallback((m: ThemeMode) => {
+    setMode(m); // 套用由上方 effect 處理
+    api.setSetting(api.THEME_MODE_KEY, m);
+  }, []);
 
   // 關鍵字搜尋：250ms 防抖；空字串則清空結果
   useEffect(() => {
@@ -114,7 +165,7 @@ export default function App() {
   );
 
   return (
-    <div className="relative flex h-screen w-screen overflow-hidden bg-white text-slate-900">
+    <div className="relative flex h-screen w-screen overflow-hidden bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100">
       {error && (
         <div className="absolute inset-x-0 top-0 z-50 flex items-center justify-between gap-3 bg-rose-600 px-4 py-2 text-sm text-white">
           <span className="truncate">{error}</span>
@@ -140,20 +191,27 @@ export default function App() {
       />
       <main className="flex-1 overflow-y-auto">
         {view === "settings" ? (
-          <SettingsView onClose={() => setView("editor")} />
+          <SettingsView
+            onClose={() => setView("editor")}
+            accent={accent}
+            mode={mode}
+            onAccentChange={changeAccent}
+            onModeChange={changeMode}
+          />
         ) : view === "weekly" ? (
-          <WeeklyView onClose={() => setView("editor")} />
+          <WeeklyView onClose={() => setView("editor")} dark={dark} />
         ) : report ? (
           <ReportEditor
             report={report}
             saving={saving}
             tags={tags}
+            dark={dark}
             onChange={handleChange}
             onTagsChange={handleTagsChange}
             onDelete={handleDelete}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-slate-400">載入中…</div>
+          <div className="flex h-full items-center justify-center text-slate-400 dark:text-slate-500">載入中…</div>
         )}
       </main>
     </div>
