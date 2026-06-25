@@ -1,4 +1,4 @@
-import { type Report } from "../types";
+import { type Report, type Task, TASK_STATUS_LABELS } from "../types";
 import { runAi } from "./api";
 
 /** 取得目前日報的 Markdown 原文（給 AI 當輸入） */
@@ -91,6 +91,74 @@ export async function summarizeRange(reports: Report[], rangeLabel: string): Pro
 - 用繁體中文、Markdown 格式（## 分類、**面向**、- 條列）。只輸出報告本身，不要前言或結語。
 
 ${daily}`;
+  return (await runAi(prompt)).trim();
+}
+
+/** 把一筆工作項目組成給 AI 讀的一行描述 */
+function taskLine(t: Task): string {
+  const proj = t.project.trim() ? `[${t.project.trim()}] ` : "";
+  const notes = t.notes.trim() ? `（細節：${t.notes.trim().replace(/\s+/g, " ")}）` : "";
+  return `- ${proj}${t.title.trim()}（狀態：${TASK_STATUS_LABELS[t.status]}）${notes}`;
+}
+
+/**
+ * 從「今天動過的工作項目」草擬當日日報：
+ * 收集今天完成（completed_at 為當天）+ 所有進行中的項目，請 AI 產出日報 Markdown。
+ * 若沒有可用項目則丟出錯誤。
+ */
+export async function draftReportFromTasks(tasks: Task[], date: string): Promise<string> {
+  const doneToday = tasks.filter(
+    (t) => t.status === "done" && (t.completed_at ?? "").slice(0, 10) === date,
+  );
+  const doing = tasks.filter((t) => t.status === "doing");
+  if (doneToday.length === 0 && doing.length === 0) {
+    throw new Error("今天沒有完成或進行中的工作項目");
+  }
+
+  const doneText = doneToday.length ? doneToday.map(taskLine).join("\n") : "（無）";
+  const doingText = doing.length ? doing.map(taskLine).join("\n") : "（無）";
+
+  const prompt = `你是協助工程師撰寫「對主管的工作日報」的助理。以下是我今天（${date}）在工作面板上「已完成」與「進行中」的工作項目。請據此整理成一份專業、條列清楚、以分類為主的繁體中文日報初稿。
+
+整理時請特別注意：
+- 只根據提供的項目整理，不要臆測或杜撰未提及的內容。
+- 用詞具體明確，避免含糊籠統的寫法；完成的用肯定語氣，進行中的標明在進行中。
+- 成果能量化就量化（數量、版本、影響範圍）。
+
+${FORMAT_RULE}
+
+【今天完成的項目】
+${doneText}
+
+【進行中的項目】
+${doingText}`;
+  return (await runAi(prompt)).trim();
+}
+
+/** 把一個大任務拆解成 Markdown 待辦清單（checklist），回傳 Markdown 文字 */
+export async function breakdownTask(title: string, notes: string): Promise<string> {
+  const base = notes.trim() ? `${title.trim()}\n\n補充：${notes.trim()}` : title.trim();
+  const prompt = `請把以下這個工作任務，拆解成可執行的子步驟，輸出成 Markdown 待辦清單（checklist）。每個步驟一行、以「- [ ] 」開頭，用語精簡具體，由先到後排序。只輸出清單本身，不要任何前言或結語。
+
+【任務】
+${base}`;
+  return (await runAi(prompt)).trim();
+}
+
+/** 把某專案的所有工作項目彙整成進度報告，回傳 Markdown 文字 */
+export async function summarizeProject(tasks: Task[], projectName: string): Promise<string> {
+  const list = tasks.map(taskLine).join("\n");
+  const label = projectName.trim() || "（未分類）";
+  const prompt = `以下是「${label}」這個專案目前的所有工作項目（含狀態）。請彙整成一份給主管看的「專案進度報告」。
+
+要求：
+- 開頭用一兩句話總結整體進度。
+- 條列：已完成重點、進行中、待辦/後續計劃、遇到的問題或風險（沒有的面向就省略）。
+- 合併相關項目，呈現整體進展而非逐項流水帳；依重要性排序。
+- 用繁體中文、Markdown 格式。只輸出報告本身，不要前言或結語。
+
+【工作項目】
+${list}`;
   return (await runAi(prompt)).trim();
 }
 

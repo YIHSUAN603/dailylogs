@@ -3,7 +3,8 @@ import Sidebar from "./components/Sidebar";
 import ReportEditor from "./components/ReportEditor";
 import SettingsView from "./views/SettingsView";
 import WeeklyView from "./views/WeeklyView";
-import { emptyReport, type Report, type ReportMeta, type SearchHit } from "./types";
+import WorkPanelView from "./views/WorkPanelView";
+import { emptyReport, type Report, type ReportMeta, type SearchHit, type Task } from "./types";
 import { todayStr } from "./lib/format";
 import * as api from "./lib/api";
 import {
@@ -21,9 +22,10 @@ import {
 export default function App() {
   const [reports, setReports] = useState<ReportMeta[]>([]);
   const [report, setReport] = useState<Report | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [view, setView] = useState<"editor" | "settings" | "weekly">("editor");
+  const [view, setView] = useState<"editor" | "settings" | "weekly" | "tasks">("editor");
   const [search, setSearch] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [error, setError] = useState("");
@@ -37,6 +39,14 @@ export default function App() {
       setReports(await api.listReports());
     } catch (e) {
       setError(`載入清單失敗：${e}`);
+    }
+  }, []);
+
+  const refreshTasks = useCallback(async () => {
+    try {
+      setTasks(await api.listTasks());
+    } catch (e) {
+      setError(`載入工作項目失敗：${e}`);
     }
   }, []);
 
@@ -56,9 +66,10 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await refreshList();
+      await refreshTasks();
       await openDate(todayStr());
     })();
-  }, [refreshList, openDate]);
+  }, [refreshList, refreshTasks, openDate]);
 
   // 初次載入：套用已存的主題設定（主色 + 模式；模式的套用交給下方 effect）
   useEffect(() => {
@@ -188,6 +199,7 @@ export default function App() {
         onPickDate={openDate}
         onOpenSettings={() => setView("settings")}
         onOpenWeekly={() => setView("weekly")}
+        onOpenTasks={() => setView("tasks")}
       />
       <main className="flex-1 overflow-y-auto">
         {view === "settings" ? (
@@ -200,11 +212,14 @@ export default function App() {
           />
         ) : view === "weekly" ? (
           <WeeklyView onClose={() => setView("editor")} dark={dark} />
+        ) : view === "tasks" ? (
+          <WorkPanelView tasks={tasks} onChanged={refreshTasks} onClose={() => setView("editor")} />
         ) : report ? (
           <ReportEditor
             report={report}
             saving={saving}
             tags={tags}
+            tasks={tasks}
             dark={dark}
             onChange={handleChange}
             onTagsChange={handleTagsChange}

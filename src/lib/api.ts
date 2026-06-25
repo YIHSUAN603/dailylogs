@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Report, ReportMeta, SearchHit, Summary, SummaryMeta } from "../types";
+import type { Report, ReportMeta, SearchHit, Summary, SummaryMeta, Task } from "../types";
 
 /** 取得所有日報（側欄用），依日期新到舊 */
 export function listReports(): Promise<ReportMeta[]> {
@@ -49,6 +49,26 @@ export function getSummary(id: number): Promise<Summary | null> {
 /** 刪除某份彙整報告 */
 export function deleteSummary(id: number): Promise<void> {
   return invoke("delete_summary", { id });
+}
+
+/** 取得所有工作項目 */
+export function listTasks(): Promise<Task[]> {
+  return invoke("list_tasks");
+}
+
+/** 取得某筆工作項目，不存在回傳 null */
+export function getTask(id: number): Promise<Task | null> {
+  return invoke("get_task", { id });
+}
+
+/** 新增/更新一筆工作項目，回傳寫入後的完整 Task */
+export function saveTask(task: Task): Promise<Task> {
+  return invoke("save_task", { task });
+}
+
+/** 刪除某筆工作項目 */
+export function deleteTask(id: number): Promise<void> {
+  return invoke("delete_task", { id });
 }
 
 /** 讀取設定值 */

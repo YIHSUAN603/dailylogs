@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import MDEditor from "@uiw/react-md-editor";
 import "@uiw/react-md-editor/markdown-editor.css";
-import type { Report } from "../types";
+import type { Report, Task } from "../types";
 import { reportToEditableText, dedupeCommits } from "../lib/format";
 import * as exporter from "../lib/export";
 import * as ai from "../lib/ai";
@@ -12,13 +12,14 @@ interface Props {
   report: Report;
   saving: boolean;
   tags: string[];
+  tasks: Task[];
   dark: boolean;
   onChange: (patch: Partial<Report>) => void;
   onTagsChange: (tags: string[]) => void;
   onDelete: (date: string) => Promise<void>;
 }
 
-export default function ReportEditor({ report, saving, tags, dark, onChange, onTagsChange, onDelete }: Props) {
+export default function ReportEditor({ report, saving, tags, tasks, dark, onChange, onTagsChange, onDelete }: Props) {
   const [toast, setToast] = useState("");
   const [aiBusy, setAiBusy] = useState("");
 
@@ -143,6 +144,17 @@ export default function ReportEditor({ report, saving, tags, dark, onChange, onT
           })}
         >
           從 Git 草擬
+        </ToolBtn>
+        <ToolBtn
+          accent
+          disabled={!!aiBusy}
+          onClick={runAi("從工作項目草擬", async () => {
+            const draft = await ai.draftReportFromTasks(tasks, report.date);
+            const existing = report.raw_notes.trimEnd();
+            onChange({ raw_notes: existing ? `${existing}\n\n${draft}` : draft });
+          })}
+        >
+          從工作項目草擬
         </ToolBtn>
 
         <span className="ml-3 text-xs text-slate-400 dark:text-slate-500">輸出：</span>

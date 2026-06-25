@@ -1,5 +1,5 @@
 use crate::ai;
-use crate::db::{self, Report, ReportMeta, Summary, SummaryMeta};
+use crate::db::{self, Report, ReportMeta, Summary, SummaryMeta, Task};
 use crate::tfs::{self, TfsConfig};
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -88,6 +88,31 @@ pub fn get_summary(state: State<DbState>, id: i64) -> Result<Option<Summary>, St
 pub fn delete_summary(state: State<DbState>, id: i64) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::delete_summary(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_tasks(state: State<DbState>) -> Result<Vec<Task>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::list_tasks(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_task(state: State<DbState>, id: i64) -> Result<Option<Task>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_task(&conn, id).map_err(|e| e.to_string())
+}
+
+/// 新增/更新一筆工作項目，回傳寫入後的完整 Task
+#[tauri::command]
+pub fn save_task(state: State<DbState>, task: Task) -> Result<Task, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::save_task(&conn, &task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_task(state: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::delete_task(&conn, id).map_err(|e| e.to_string())
 }
 
 /// 寫入文字檔（路徑由前端的存檔對話框取得）
