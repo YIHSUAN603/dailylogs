@@ -41,30 +41,9 @@ stages:
           - checkout: self
             fetchDepth: 1
 
-          # ---------- 快取 ----------
-          - task: Cache@2
-            displayName: "Cache node_modules"
-            inputs:
-              key: 'npm | "$(Agent.OS)" | package-lock.json'
-              restoreKeys: |
-                npm | "$(Agent.OS)"
-              path: "$(Build.SourcesDirectory)/node_modules"
-
-          - task: Cache@2
-            displayName: "Cache cargo registry"
-            inputs:
-              key: 'cargo-registry | "$(Agent.OS)" | src-tauri/Cargo.lock'
-              restoreKeys: |
-                cargo-registry | "$(Agent.OS)"
-              path: "$(USERPROFILE)/.cargo/registry"
-
-          - task: Cache@2
-            displayName: "Cache cargo target (debug)"
-            inputs:
-              key: 'cargo-target-debug | "$(Agent.OS)" | src-tauri/Cargo.lock'
-              restoreKeys: |
-                cargo-target-debug | "$(Agent.OS)"
-              path: "$(Build.SourcesDirectory)/src-tauri/target"
+          # 註：Pipeline 快取（Cache@2）僅雲端 Azure DevOps Services 支援，
+          #     地端 Server 版會報 TF400734；self-hosted agent 的 work 目錄與
+          #     %USERPROFILE%\.cargo 本來就持久化，毋須快取任務。
 
           # ---------- 前端 ----------
           - script: npm ci
@@ -128,30 +107,7 @@ stages:
               }
             displayName: "檢查 tag == tauri.conf == Cargo.toml 版本"
 
-          # ---------- 快取 ----------
-          - task: Cache@2
-            displayName: "Cache node_modules"
-            inputs:
-              key: 'npm | "$(Agent.OS)" | package-lock.json'
-              restoreKeys: |
-                npm | "$(Agent.OS)"
-              path: "$(Build.SourcesDirectory)/node_modules"
-
-          - task: Cache@2
-            displayName: "Cache cargo registry"
-            inputs:
-              key: 'cargo-registry | "$(Agent.OS)" | src-tauri/Cargo.lock'
-              restoreKeys: |
-                cargo-registry | "$(Agent.OS)"
-              path: "$(USERPROFILE)/.cargo/registry"
-
-          - task: Cache@2
-            displayName: "Cache cargo target (release)"
-            inputs:
-              key: 'cargo-target-release | "$(Agent.OS)" | src-tauri/Cargo.lock'
-              restoreKeys: |
-                cargo-target-release | "$(Agent.OS)"
-              path: "$(Build.SourcesDirectory)/src-tauri/target"
+          # 註：Cache@2 僅雲端支援，地端 Server 版會報 TF400734（見 CI stage 說明）
 
           - script: npm ci
             displayName: "npm ci"
