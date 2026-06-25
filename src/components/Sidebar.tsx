@@ -23,21 +23,21 @@ function MonthCalendar({ value, onSelect }: { value: string; onSelect: (date: st
   };
 
   return (
-    <div className="w-60 rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+    <div className="w-60 rounded-md border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-center justify-between px-1 pb-1">
-        <button onClick={() => shift(-1)} aria-label="上個月" className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100">
+        <button onClick={() => shift(-1)} aria-label="上個月" className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
           ‹
         </button>
-        <span className="text-sm font-medium text-slate-700">
+        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
           {view.y} 年 {view.m + 1} 月
         </span>
-        <button onClick={() => shift(1)} aria-label="下個月" className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100">
+        <button onClick={() => shift(1)} aria-label="下個月" className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
           ›
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0.5 text-center text-xs">
         {WEEK.map((w) => (
-          <span key={w} className="py-1 text-slate-400">
+          <span key={w} className="py-1 text-slate-400 dark:text-slate-500">
             {w}
           </span>
         ))}
@@ -50,12 +50,12 @@ function MonthCalendar({ value, onSelect }: { value: string; onSelect: (date: st
             <button
               key={i}
               onClick={() => onSelect(ds)}
-              className={`rounded py-1 hover:bg-sky-100 ${
+              className={`rounded py-1 hover:bg-accent-100 dark:hover:bg-accent-900/40 ${
                 isSel
-                  ? "bg-sky-600 text-white hover:bg-sky-600"
+                  ? "bg-accent-600 text-white hover:bg-accent-600"
                   : isToday
-                    ? "font-bold text-sky-600"
-                    : "text-slate-700"
+                    ? "font-bold text-accent-600 dark:text-accent-400"
+                    : "text-slate-700 dark:text-slate-300"
               }`}
             >
               {d}
@@ -84,7 +84,9 @@ function StatusBadge({ status }: { status: ReportMeta["status"] }) {
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-xs ${
-        status === "final" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+        status === "final"
+          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+          : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
       }`}
     >
       {status === "final" ? "完成" : "草稿"}
@@ -149,14 +151,14 @@ export default function Sidebar({
   }, [pickerOpen]);
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50">
+    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-center justify-between px-4 py-3">
-        <h1 className="text-base font-bold text-slate-800">日報告</h1>
+        <h1 className="text-base font-bold text-slate-800 dark:text-slate-100">日報告</h1>
         <div ref={pickerRef} className="relative flex items-center">
           {/* split button：左邊開啟目前日期（預設今日），右邊小箭頭展開自繪月曆 */}
           <button
             onClick={() => onPickDate(activeDate)}
-            className="rounded-l-md bg-sky-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-sky-700"
+            className="rounded-l-md bg-accent-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-accent-700"
           >
             + {isToday ? "今日" : activeDate.slice(5)}
           </button>
@@ -165,7 +167,7 @@ export default function Sidebar({
             title="選擇其他日期"
             aria-label="選擇其他日期"
             aria-expanded={pickerOpen}
-            className="rounded-r-md border-l border-sky-500 bg-sky-600 px-1.5 py-1 text-sm text-white hover:bg-sky-700"
+            className="rounded-r-md border-l border-accent-500 bg-accent-600 px-1.5 py-1 text-sm text-white hover:bg-accent-700"
           >
             ▾
           </button>
@@ -189,12 +191,12 @@ export default function Sidebar({
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="搜尋日報…"
-            className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 pr-7 text-sm text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+            className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 pr-7 text-sm text-slate-700 placeholder:text-slate-400 focus:border-accent-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
           />
           {searching && (
             <button
               onClick={() => onSearchChange("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-slate-400 hover:text-slate-600"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               aria-label="清除搜尋"
             >
               ✕
@@ -205,7 +207,7 @@ export default function Sidebar({
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         {searching ? (
           hits.length === 0 ? (
-            <p className="px-2 py-6 text-center text-sm text-slate-400">找不到符合的日報</p>
+            <p className="px-2 py-6 text-center text-sm text-slate-400 dark:text-slate-500">找不到符合的日報</p>
           ) : (
             <ul className="space-y-1">
               {hits.map((h) => {
@@ -215,14 +217,16 @@ export default function Sidebar({
                     <button
                       onClick={() => onSelect(h.date)}
                       className={`flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left ${
-                        active ? "bg-sky-100 text-sky-900" : "text-slate-700 hover:bg-slate-100"
+                        active
+                          ? "bg-accent-100 text-accent-900 dark:bg-accent-900/40 dark:text-accent-100"
+                          : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
                       }`}
                     >
                       <span className="flex items-center justify-between text-sm">
                         <span className="font-medium">{h.date}</span>
                         <StatusBadge status={h.status} />
                       </span>
-                      <span className="line-clamp-2 text-xs text-slate-500">
+                      <span className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400">
                         {highlight(h.snippet, search)}
                       </span>
                     </button>
@@ -234,7 +238,7 @@ export default function Sidebar({
         ) : (
           <>
             {reports.length === 0 && (
-              <p className="px-2 py-6 text-center text-sm text-slate-400">尚無日報，點「+ 今日」開始</p>
+              <p className="px-2 py-6 text-center text-sm text-slate-400 dark:text-slate-500">尚無日報，點「+ 今日」開始</p>
             )}
             <ul className="space-y-1">
               {reports.map((r) => {
@@ -244,7 +248,9 @@ export default function Sidebar({
                     <button
                       onClick={() => onSelect(r.date)}
                       className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm ${
-                        active ? "bg-sky-100 text-sky-900" : "text-slate-700 hover:bg-slate-100"
+                        active
+                          ? "bg-accent-100 text-accent-900 dark:bg-accent-900/40 dark:text-accent-100"
+                          : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
                       }`}
                     >
                       <span className="font-medium">{r.date}</span>
@@ -259,13 +265,13 @@ export default function Sidebar({
       </div>
       <button
         onClick={onOpenWeekly}
-        className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100"
+        className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
       >
         📅 週報 / 月報
       </button>
       <button
         onClick={onOpenSettings}
-        className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100"
+        className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
       >
         ⚙ 設定
       </button>

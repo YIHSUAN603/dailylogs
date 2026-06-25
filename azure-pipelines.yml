@@ -5,7 +5,6 @@
 trigger:
   branches:
     include:
-      - develop
       - main
   tags:
     include:
@@ -14,7 +13,6 @@ trigger:
 pr:
   branches:
     include:
-      - develop
       - main
 
 variables:
@@ -34,7 +32,7 @@ stages:
         displayName: "前端 + Rust 驗證"
         timeoutInMinutes: 60
         pool:
-          name: "REPLACE_WITH_YOUR_POOL" # ← 改成你的 self-hosted pool 名稱
+          name: "RichitechWindow" # ← 改成你的 self-hosted pool 名稱
           demands:
             - Agent.OS -equals Windows_NT
             - node # agent 自訂 capability（見 README / 計畫）
@@ -174,3 +172,31 @@ stages:
             inputs:
               targetPath: "src-tauri/target/release/dailylogs.exe"
               artifactName: "standalone-exe"
+
+          # ---------- 上傳到 Google Drive（個人 OAuth，rclone）----------
+          # 前置：本機 rclone config 產生含 OAuth token 的設定，遠端命名 gdrive，
+          #       上傳成 Pipelines → Library → Secure files，檔名 rclone.conf
+          - task: DownloadSecureFile@1
+            name: rcloneConf
+            displayName: "取得 rclone 設定（含 OAuth token）"
+            inputs:
+              secureFile: "rclone.conf"
+
+          - powershell: |
+              $ErrorActionPreference = 'Stop'
+              # 確保 rclone 存在（agent 第一次跑會自動下載免安裝版）
+              $rclone = "$env:AGENT_TEMPDIRECTORY\rclone\rclone.exe"
+              if (-not (Test-Path $rclone)) {
+                $zip = "$env:AGENT_TEMPDIRECTORY\rclone.zip"
+                Invoke-WebRequest "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile $zip
+                Expand-Archive $zip "$env:AGENT_TEMPDIRECTORY\rclone-x" -Force
+                New-Item -ItemType Directory -Force "$env:AGENT_TEMPDIRECTORY\rclone" | Out-Null
+                Copy-Item (Get-ChildItem "$env:AGENT_TEMPDIRECTORY\rclone-x" -Recurse -Filter rclone.exe)[0].FullName $rclone
+              }
+              $conf = "$(rcloneConf.secureFilePath)"
+              # 命名沿用雲端慣例：tools/dailylogs/dailylogs_<版號>（tag v1.2.0 → dailylogs_v1.2.0）
+              $dest = "gdrive:tools/dailylogs/dailylogs_$(Build.SourceBranchName)"
+              # 只傳安裝檔與獨立 exe，不傳整包 target（避免帶上 .pdb / deps / 快取雜物）
+              & $rclone --config $conf copy "src-tauri/target/release/bundle/nsis" "$dest" -v
+              & $rclone --config $conf copy "src-tauri/target/release/dailylogs.exe" "$dest" -v
+            displayName: "上傳安裝檔到 Google Drive (tools/dailylogs/dailylogs_<版號>)"

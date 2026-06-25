@@ -107,3 +107,5 @@ export const TFS_BASE_URL_KEY = "tfs_base_url";
 export const TFS_COLLECTIONS_KEY = "tfs_collections"; // JSON 字串陣列
 export const TFS_PAT_KEY = "tfs_pat";
 export const GIT_AUTHOR_KEY = "git_author"; // 作者比對關鍵字（逗號分隔，包含比對）
+export const THEME_ACCENT_KEY = "theme_accent"; // 主色名稱（AccentName）
+export const THEME_MODE_KEY = "theme_mode"; // 淺/深色模式（light | dark）
