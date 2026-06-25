@@ -103,7 +103,7 @@ stages:
         displayName: "打包 Windows 安裝檔"
         timeoutInMinutes: 120
         pool:
-          name: "REPLACE_WITH_YOUR_POOL" # ← 同上
+          name: "RichitechWindow" # ← 同上
           demands:
             - Agent.OS -equals Windows_NT
             - node
