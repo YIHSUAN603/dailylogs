@@ -117,17 +117,22 @@ stages:
             displayName: "tauri build (NSIS, MSVC native)"
 
           # ---------- 發佈 artifact（用目錄，避免中文/空白檔名問題）----------
-          - task: PublishPipelineArtifact@1
+          # 註：PublishPipelineArtifact@1（管線成品）地端 Server 版不支援，
+          #     會報「內部部署不支援管線成品工作」；改用 PublishBuildArtifacts@1
+          #     （組建成品，publishLocation: Container 存在 Server 上）。
+          - task: PublishBuildArtifacts@1
             displayName: "發佈 NSIS 安裝檔"
             inputs:
-              targetPath: "src-tauri/target/release/bundle/nsis"
-              artifactName: "nsis-installer"
+              PathtoPublish: "src-tauri/target/release/bundle/nsis"
+              ArtifactName: "nsis-installer"
+              publishLocation: "Container"
 
-          - task: PublishPipelineArtifact@1
+          - task: PublishBuildArtifacts@1
             displayName: "發佈獨立 exe"
             inputs:
-              targetPath: "src-tauri/target/release/dailylogs.exe"
-              artifactName: "standalone-exe"
+              PathtoPublish: "src-tauri/target/release/dailylogs.exe"
+              ArtifactName: "standalone-exe"
+              publishLocation: "Container"
 
           # ---------- 上傳到 Google Drive（個人 OAuth，rclone）----------
           # 前置：本機 rclone config 產生含 OAuth token 的設定，遠端命名 gdrive，
