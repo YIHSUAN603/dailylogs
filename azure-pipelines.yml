@@ -5,7 +5,6 @@
 trigger:
   branches:
     include:
-      - develop
       - main
   tags:
     include:
@@ -14,7 +13,6 @@ trigger:
 pr:
   branches:
     include:
-      - develop
       - main
 
 variables:
@@ -34,7 +32,7 @@ stages:
         displayName: "前端 + Rust 驗證"
         timeoutInMinutes: 60
         pool:
-          name: "REPLACE_WITH_YOUR_POOL" # ← 改成你的 self-hosted pool 名稱
+          name: "RichitechWindow" # ← 改成你的 self-hosted pool 名稱
           demands:
             - Agent.OS -equals Windows_NT
             - node # agent 自訂 capability（見 README / 計畫）
