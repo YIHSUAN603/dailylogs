@@ -175,6 +175,25 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
     }
   };
 
+  const genTags = async () => {
+    if (!editing) return;
+    if (!editing.title.trim()) {
+      alert("請先輸入標題");
+      return;
+    }
+    setBusy("AI 標籤中");
+    try {
+      const generated = await ai.generateTaskTags(editing);
+      // 與既有標籤合併、去重
+      const merged = Array.from(new Set([...editing.tags, ...generated]));
+      setEditing({ ...editing, tags: merged });
+    } catch (e) {
+      alert(`AI 產製標籤失敗：${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const summarizeProject = async () => {
     if (projectFilter === "all") return;
     const ofProject = tasks.filter((t) => t.project.trim() === projectFilter);
@@ -380,21 +399,31 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
               </div>
             </div>
           </div>
-          <input
-            type="text"
-            value={editing.tags.join(", ")}
-            onChange={(e) =>
-              setEditing({
-                ...editing,
-                tags: e.target.value
-                  .split(/[,，]/)
-                  .map((g) => g.trim())
-                  .filter(Boolean),
-              })
-            }
-            placeholder="標籤（以逗號分隔，可空）"
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={editing.tags.join(", ")}
+              onChange={(e) =>
+                setEditing({
+                  ...editing,
+                  tags: e.target.value
+                    .split(/[,，]/)
+                    .map((g) => g.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder="標籤（以逗號分隔，可空）"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+            />
+            <button
+              type="button"
+              onClick={genTags}
+              disabled={!!busy}
+              className="shrink-0 rounded-md border border-accent-300 bg-accent-50 px-3 py-1.5 text-sm font-medium text-accent-700 hover:bg-accent-100 disabled:opacity-50 dark:border-accent-700 dark:bg-accent-900/30 dark:text-accent-300 dark:hover:bg-accent-900/50"
+            >
+              {busy === "AI 標籤中" ? "產製中…" : "✨ AI 標籤"}
+            </button>
+          </div>
           <textarea
             value={editing.notes}
             onChange={(e) => setEditing({ ...editing, notes: e.target.value })}

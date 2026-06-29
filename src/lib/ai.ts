@@ -18,7 +18,7 @@ const FORMAT_RULE = `請「只」輸出以「專案（大類）> 子分類 > 四
 - 項目
 ### 問題
 - 無
-### 明日
+### 待辦
 - 項目
 ## 另一個子分類
 ### 完成
@@ -36,13 +36,22 @@ const FORMAT_RULE = `請「只」輸出以「專案（大類）> 子分類 > 四
 - 依專案歸納；若實在無法判斷專案，可只用一個專案名涵蓋。`;
 
 /** 零散記事 + 草稿 + 工作面板工項 → 分類為主的日報（回傳 Markdown 文字） */
-export async function organizeReport(report: Report, tasks: Task[]): Promise<string> {
+export async function organizeReport(
+  report: Report,
+  tasks: Task[],
+): Promise<string> {
   const doneToday = tasks.filter(
-    (t) => t.status === "done" && (t.completed_at ?? "").slice(0, 10) === report.date,
+    (t) =>
+      t.status === "done" &&
+      (t.completed_at ?? "").slice(0, 10) === report.date,
   );
   const doing = tasks.filter((t) => t.status === "doing");
 
-  if (!report.raw_notes.trim() && doneToday.length === 0 && doing.length === 0) {
+  if (
+    !report.raw_notes.trim() &&
+    doneToday.length === 0 &&
+    doing.length === 0
+  ) {
     throw new Error("沒有內容可整理（記事與工作項目都是空的）");
   }
 
@@ -97,7 +106,10 @@ ${draftText(report)}`;
 }
 
 /** 把多份日報彙整成週報/月報（回傳 Markdown 文字） */
-export async function summarizeRange(reports: Report[], rangeLabel: string): Promise<string> {
+export async function summarizeRange(
+  reports: Report[],
+  rangeLabel: string,
+): Promise<string> {
   const daily = reports
     .map((r) => `【${r.date}】\n${r.raw_notes.trim() || "（無內容）"}`)
     .join("\n\n");
@@ -118,7 +130,9 @@ ${daily}`;
 /** 把一筆工作項目組成給 AI 讀的一行描述 */
 function taskLine(t: Task): string {
   const proj = t.project.trim() ? `[${t.project.trim()}] ` : "";
-  const notes = t.notes.trim() ? `（細節：${t.notes.trim().replace(/\s+/g, " ")}）` : "";
+  const notes = t.notes.trim()
+    ? `（細節：${t.notes.trim().replace(/\s+/g, " ")}）`
+    : "";
   return `- ${proj}${t.title.trim()}（狀態：${TASK_STATUS_LABELS[t.status]}）${notes}`;
 }
 
@@ -138,10 +152,12 @@ function parseTaskDrafts(raw: string): TaskDraft[] {
       const arr = JSON.parse(raw.slice(start, end + 1));
       if (Array.isArray(arr)) {
         const drafts = arr
-          .map((o): TaskDraft => ({
-            title: typeof o?.title === "string" ? o.title.trim() : "",
-            notes: typeof o?.notes === "string" ? o.notes.trim() : "",
-          }))
+          .map(
+            (o): TaskDraft => ({
+              title: typeof o?.title === "string" ? o.title.trim() : "",
+              notes: typeof o?.notes === "string" ? o.notes.trim() : "",
+            }),
+          )
           .filter((d) => d.title);
         if (drafts.length) return drafts;
       }
@@ -181,7 +197,10 @@ ${input.trim()}`;
 }
 
 /** 把某專案的所有工作項目彙整成進度報告，回傳 Markdown 文字 */
-export async function summarizeProject(tasks: Task[], projectName: string): Promise<string> {
+export async function summarizeProject(
+  tasks: Task[],
+  projectName: string,
+): Promise<string> {
   const list = tasks.map(taskLine).join("\n");
   const label = projectName.trim() || "（未分類）";
   const prompt = `以下是「${label}」這個專案目前的所有工作項目（含狀態）。請彙整成一份給主管看的「專案進度報告」。
@@ -197,15 +216,29 @@ ${list}`;
   return (await runAi(prompt)).trim();
 }
 
-/** 自動產生 2-5 個分類標籤 */
-export async function generateTags(report: Report): Promise<string[]> {
-  const prompt = `根據以下工作日報內容，產生 2 到 5 個分類標籤（例如：專案名稱、使用技術、工作類型）。只輸出標籤，以半形逗號分隔，不要任何其他文字。
-
-${draftText(report)}`;
-  const out = await runAi(prompt);
+/** 把 AI 回應切成乾淨的標籤陣列（去符號、去空、最多 5 個） */
+function parseTags(out: string): string[] {
   return out
     .split(/[,，\n]/)
     .map((t) => t.replace(/^[-#\s]+/, "").trim())
     .filter(Boolean)
     .slice(0, 5);
+}
+
+/** 自動產生 2-5 個分類標籤 */
+export async function generateTags(report: Report): Promise<string[]> {
+  const prompt = `根據以下工作日報內容，產生 2 到 5 個分類標籤（例如：專案名稱、使用技術、工作類型）。只輸出標籤，以半形逗號分隔，不要任何其他文字。
+
+${draftText(report)}`;
+  return parseTags(await runAi(prompt));
+}
+
+/** 為單筆工作項目自動產生 2-5 個分類標籤 */
+export async function generateTaskTags(task: Task): Promise<string[]> {
+  const proj = task.project.trim() ? `\n專案：${task.project.trim()}` : "";
+  const notes = task.notes.trim() ? `\n細節：${task.notes.trim()}` : "";
+  const prompt = `根據以下工作項目，產生 2 到 5 個分類標籤（例如：專案名稱、使用技術、工作類型）。只輸出標籤，以半形逗號分隔，不要任何其他文字。
+
+標題：${task.title.trim() || "（無標題）"}${proj}${notes}`;
+  return parseTags(await runAi(prompt));
 }
