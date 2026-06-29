@@ -369,8 +369,9 @@ const TASK_COLS: &str =
 
 /// 所有工作項目，依狀態與更新時間排序（細部過濾/排序由前端處理）
 pub fn list_tasks(conn: &Connection) -> rusqlite::Result<Vec<Task>> {
-    let mut stmt =
-        conn.prepare(&format!("SELECT {TASK_COLS} FROM tasks ORDER BY updated_at DESC"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {TASK_COLS} FROM tasks ORDER BY updated_at DESC"
+    ))?;
     let rows = stmt.query_map([], |r| row_to_task(r))?;
     rows.collect()
 }
@@ -405,8 +406,16 @@ pub fn save_task(conn: &Connection, task: &Task) -> rusqlite::Result<Task> {
                 "UPDATE tasks SET title=?2, status=?3, project=?4, priority=?5, due_date=?6,
                     notes=?7, tags=?8, completed_at=?9, updated_at=?10 WHERE id=?1",
                 rusqlite::params![
-                    id, task.title, task.status, task.project, task.priority, task.due_date,
-                    task.notes, tags_json, completed_at, now
+                    id,
+                    task.title,
+                    task.status,
+                    task.project,
+                    task.priority,
+                    task.due_date,
+                    task.notes,
+                    tags_json,
+                    completed_at,
+                    now
                 ],
             )?;
             id
@@ -417,8 +426,15 @@ pub fn save_task(conn: &Connection, task: &Task) -> rusqlite::Result<Task> {
                     completed_at, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
                 rusqlite::params![
-                    task.title, task.status, task.project, task.priority, task.due_date,
-                    task.notes, tags_json, completed_at, now
+                    task.title,
+                    task.status,
+                    task.project,
+                    task.priority,
+                    task.due_date,
+                    task.notes,
+                    tags_json,
+                    completed_at,
+                    now
                 ],
             )?;
             conn.last_insert_rowid()
