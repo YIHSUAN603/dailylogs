@@ -77,6 +77,7 @@ interface Props {
   onPickDate: (date: string) => void;
   onOpenSettings: () => void;
   onOpenWeekly: () => void;
+  onOpenTasks: () => void;
 }
 
 /** 狀態 badge（草稿/完成） */
@@ -128,6 +129,7 @@ export default function Sidebar({
   onPickDate,
   onOpenSettings,
   onOpenWeekly,
+  onOpenTasks,
 }: Props) {
   const searching = search.trim().length > 0;
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -263,6 +265,12 @@ export default function Sidebar({
           </>
         )}
       </div>
+      <button
+        onClick={onOpenTasks}
+        className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+      >
+        🗂 工作面板
+      </button>
       <button
         onClick={onOpenWeekly}
         className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"

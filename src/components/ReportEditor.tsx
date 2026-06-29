@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import MDEditor from "@uiw/react-md-editor";
 import "@uiw/react-md-editor/markdown-editor.css";
-import type { Report } from "../types";
+import type { Report, Task } from "../types";
 import { reportToEditableText, dedupeCommits } from "../lib/format";
 import * as exporter from "../lib/export";
 import * as ai from "../lib/ai";
@@ -12,13 +12,14 @@ interface Props {
   report: Report;
   saving: boolean;
   tags: string[];
+  tasks: Task[];
   dark: boolean;
   onChange: (patch: Partial<Report>) => void;
   onTagsChange: (tags: string[]) => void;
   onDelete: (date: string) => Promise<void>;
 }
 
-export default function ReportEditor({ report, saving, tags, dark, onChange, onTagsChange, onDelete }: Props) {
+export default function ReportEditor({ report, saving, tags, tasks, dark, onChange, onTagsChange, onDelete }: Props) {
   const [toast, setToast] = useState("");
   const [aiBusy, setAiBusy] = useState("");
 
@@ -103,8 +104,7 @@ export default function ReportEditor({ report, saving, tags, dark, onChange, onT
           accent
           disabled={!!aiBusy}
           onClick={runAi("整理成正式報告", async () => {
-            if (!report.raw_notes.trim()) throw new Error("內容是空的，先寫點東西");
-            onChange({ raw_notes: await ai.organizeReport(report) });
+            onChange({ raw_notes: await ai.organizeReport(report, tasks) });
           })}
         >
           整理成正式報告

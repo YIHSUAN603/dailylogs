@@ -9,6 +9,8 @@ const CONCURRENCY: usize = 10;
 /// 某個 repo 在指定日期、指定作者的 commit
 #[derive(serde::Serialize)]
 pub struct RepoCommits {
+    /// repo 所屬的 TFS 團隊專案名稱（可能為空）
+    pub project: String,
     pub repo: String,
     pub commits: Vec<String>,
 }
@@ -32,6 +34,25 @@ struct ReposResp {
 #[derive(serde::Deserialize)]
 struct RepoItem {
     id: String,
+    name: String,
+    #[serde(default)]
+    project: ProjectRef,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ProjectRef {
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ProjectsResp {
+    #[serde(default)]
+    value: Vec<ProjectItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct ProjectItem {
     name: String,
 }
 
@@ -131,6 +152,46 @@ async fn fetch_repo_commits(
     }
 }
 
+/// 列出單一 collection 底下所有團隊專案名稱
+async fn list_collection_projects(
+    client: &reqwest::Client,
+    cfg: &TfsConfig,
+    collection: &str,
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/{}/_apis/projects", base(cfg), collection);
+    let resp = client
+        .get(&url)
+        .basic_auth("", Some(&cfg.pat))
+        .query(&[("api-version", API_VERSION)])
+        .send()
+        .await
+        .map_err(|e| format!("連線失敗：{e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "collection「{collection}」回應 {}（請確認位址、collection 名稱與 PAT 權限）",
+            resp.status()
+        ));
+    }
+    let parsed: ProjectsResp = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析專案清單失敗：{e}"))?;
+    Ok(parsed.value.into_iter().map(|p| p.name).collect())
+}
+
+/// 列出所有設定 collection 的團隊專案名稱（去重 + 排序）
+pub async fn list_projects(cfg: &TfsConfig) -> Result<Vec<String>, String> {
+    let client = build_client()?;
+    let mut names: Vec<String> = Vec::new();
+    for c in &cfg.collections {
+        names.extend(list_collection_projects(&client, cfg, c).await?);
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
 /// 列出所有設定 collection 的 repo 總數（測試連線用，錯誤會往上拋）
 pub async fn count_repos(cfg: &TfsConfig) -> Result<usize, String> {
     let client = build_client()?;
@@ -151,35 +212,35 @@ pub async fn collect_commits(cfg: &TfsConfig, date: &str) -> Result<Vec<RepoComm
 
     let client = build_client()?;
 
-    // 攤平成 (collection, repo_id, repo_name)；某 collection 失敗則略過
-    let mut flat: Vec<(String, String, String)> = Vec::new();
+    // 攤平成 (collection, repo_id, repo_name, project_name)；某 collection 失敗則略過
+    let mut flat: Vec<(String, String, String, String)> = Vec::new();
     for c in &cfg.collections {
         if let Ok(repos) = list_repositories(&client, cfg, c).await {
             for r in repos {
-                flat.push((c.clone(), r.id, r.name));
+                flat.push((c.clone(), r.id, r.name, r.project.name));
             }
         }
     }
 
     // repo 名若在多個 collection 重複，顯示成 collection/repo 以區分
     let mut name_count: HashMap<&str, usize> = HashMap::new();
-    for (_, _, name) in &flat {
+    for (_, _, name, _) in &flat {
         *name_count.entry(name.as_str()).or_insert(0) += 1;
     }
 
     let mut result: Vec<RepoCommits> = Vec::new();
     for chunk in flat.chunks(CONCURRENCY) {
-        let futs = chunk.iter().map(|(coll, id, name)| {
+        let futs = chunk.iter().map(|(coll, id, name, project)| {
             let client = &client;
             let cfg = &cfg;
             let from = from.as_str();
             let to = to.as_str();
             async move {
                 let items = fetch_repo_commits(client, cfg, coll, id, from, to).await;
-                (coll, name, items)
+                (coll, name, project, items)
             }
         });
-        for (coll, name, items) in futures::future::join_all(futs).await {
+        for (coll, name, project, items) in futures::future::join_all(futs).await {
             let commits: Vec<String> = items
                 .into_iter()
                 .filter(|c| commit_on_date(c, target))
@@ -199,12 +260,14 @@ pub async fn collect_commits(cfg: &TfsConfig, date: &str) -> Result<Vec<RepoComm
                 name.clone()
             };
             result.push(RepoCommits {
+                project: project.clone(),
                 repo: display,
                 commits,
             });
         }
     }
-    result.sort_by(|a, b| a.repo.cmp(&b.repo));
+    // 先依 project、再依 repo 排序，讓 format_commits 可用「連續同 project」分組
+    result.sort_by(|a, b| a.project.cmp(&b.project).then_with(|| a.repo.cmp(&b.repo)));
     Ok(result)
 }
 
@@ -238,18 +301,29 @@ fn author_matches(c: &CommitItem, authors: &[String]) -> bool {
     authors.iter().any(|kw| name.contains(&kw.to_lowercase()))
 }
 
-/// 把多個 repo 的 commit 組成給 AI / 隨手記用的文字
+/// 把多個 repo 的 commit 組成給 AI / 隨手記用的文字。
+/// 以「# 專案」為大標、「[repo]」為子層；專案間空一行，同專案下各 repo 連續。
+/// 輸入須已先依 project、再依 repo 排序（collect_commits 已處理）。
 pub fn format_commits(repos: &[RepoCommits]) -> String {
     let mut lines = Vec::new();
+    let mut cur_project: Option<&str> = None;
     for rc in repos {
         if rc.commits.is_empty() {
             continue;
+        }
+        if cur_project != Some(rc.project.as_str()) {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            if !rc.project.is_empty() {
+                lines.push(format!("# {}", rc.project));
+            }
+            cur_project = Some(rc.project.as_str());
         }
         lines.push(format!("[{}]", rc.repo));
         for c in &rc.commits {
             lines.push(format!("- {c}"));
         }
-        lines.push(String::new());
     }
     lines.join("\n").trim().to_string()
 }

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Report, ReportMeta, SearchHit, Summary, SummaryMeta } from "../types";
+import type { Report, ReportMeta, SearchHit, Summary, SummaryMeta, Task } from "../types";
 
 /** 取得所有日報（側欄用），依日期新到舊 */
 export function listReports(): Promise<ReportMeta[]> {
@@ -51,6 +51,26 @@ export function deleteSummary(id: number): Promise<void> {
   return invoke("delete_summary", { id });
 }
 
+/** 取得所有工作項目 */
+export function listTasks(): Promise<Task[]> {
+  return invoke("list_tasks");
+}
+
+/** 取得某筆工作項目，不存在回傳 null */
+export function getTask(id: number): Promise<Task | null> {
+  return invoke("get_task", { id });
+}
+
+/** 新增/更新一筆工作項目，回傳寫入後的完整 Task */
+export function saveTask(task: Task): Promise<Task> {
+  return invoke("save_task", { task });
+}
+
+/** 刪除某筆工作項目 */
+export function deleteTask(id: number): Promise<void> {
+  return invoke("delete_task", { id });
+}
+
 /** 讀取設定值 */
 export function getSetting(key: string): Promise<string | null> {
   return invoke("get_setting", { key });
@@ -86,6 +106,11 @@ export function tfsTestConnection(): Promise<number> {
   return invoke("tfs_test_connection");
 }
 
+/** 列出所有 collection 的團隊專案名稱（給工作面板匯入專案用） */
+export function tfsListProjects(): Promise<string[]> {
+  return invoke("tfs_list_projects");
+}
+
 /** 讀取文字檔（路徑由前端的開檔對話框取得，給匯入用） */
 export function readTextFile(path: string): Promise<string> {
   return invoke("read_text_file", { path });
@@ -107,5 +132,6 @@ export const TFS_BASE_URL_KEY = "tfs_base_url";
 export const TFS_COLLECTIONS_KEY = "tfs_collections"; // JSON 字串陣列
 export const TFS_PAT_KEY = "tfs_pat";
 export const GIT_AUTHOR_KEY = "git_author"; // 作者比對關鍵字（逗號分隔，包含比對）
+export const TFS_PROJECTS_KEY = "tfs_projects"; // 匯入的 TFS 專案名稱（JSON 陣列）
 export const THEME_ACCENT_KEY = "theme_accent"; // 主色名稱（AccentName）
 export const THEME_MODE_KEY = "theme_mode"; // 淺/深色模式（light | dark）

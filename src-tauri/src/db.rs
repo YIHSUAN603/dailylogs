@@ -60,6 +60,28 @@ pub struct SummaryMeta {
     pub updated_at: String,
 }
 
+/// 一筆工作項目（持續任務，跨多天存在）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Task {
+    #[serde(default)]
+    pub id: Option<i64>, // 新建時為 None，後端 autoincrement
+    pub title: String,
+    pub status: String,   // "todo" | "doing" | "done" | "hold"
+    pub project: String,  // 專案/大類；可為空
+    pub priority: String, // "low" | "normal" | "high"
+    #[serde(default)]
+    pub due_date: Option<String>, // YYYY-MM-DD，可為 None
+    pub notes: String,    // Markdown 細節
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>, // 標記完成時間，可為 None
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
 /// 關鍵字搜尋的單筆結果
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchHit {
@@ -106,6 +128,20 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
             content     TEXT NOT NULL DEFAULT '',
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'todo',
+            project      TEXT NOT NULL DEFAULT '',
+            priority     TEXT NOT NULL DEFAULT 'normal',
+            due_date     TEXT,
+            notes        TEXT NOT NULL DEFAULT '',
+            tags         TEXT NOT NULL DEFAULT '[]',
+            completed_at TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
         );",
     )?;
     // 舊資料庫（四段式）遷移：補上 categories 欄位（已存在則忽略錯誤）
@@ -306,6 +342,96 @@ pub fn save_report(conn: &Connection, report: &Report) -> rusqlite::Result<Strin
 pub fn delete_report(conn: &Connection, date: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM reports WHERE date = ?1", [date])?;
     conn.execute("DELETE FROM report_tags WHERE report_date = ?1", [date])?;
+    Ok(())
+}
+
+/// 從一列查詢結果組出 Task（欄位順序需與下方 SELECT 一致）
+fn row_to_task(r: &rusqlite::Row) -> rusqlite::Result<Task> {
+    let tags_json: String = r.get(7)?;
+    let tags = serde_json::from_str(&tags_json).unwrap_or_default();
+    Ok(Task {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        status: r.get(2)?,
+        project: r.get(3)?,
+        priority: r.get(4)?,
+        due_date: r.get(5)?,
+        notes: r.get(6)?,
+        tags,
+        completed_at: r.get(8)?,
+        created_at: r.get(9)?,
+        updated_at: r.get(10)?,
+    })
+}
+
+const TASK_COLS: &str =
+    "id, title, status, project, priority, due_date, notes, tags, completed_at, created_at, updated_at";
+
+/// 所有工作項目，依狀態與更新時間排序（細部過濾/排序由前端處理）
+pub fn list_tasks(conn: &Connection) -> rusqlite::Result<Vec<Task>> {
+    let mut stmt =
+        conn.prepare(&format!("SELECT {TASK_COLS} FROM tasks ORDER BY updated_at DESC"))?;
+    let rows = stmt.query_map([], |r| row_to_task(r))?;
+    rows.collect()
+}
+
+/// 取得某筆工作項目；不存在回傳 None
+pub fn get_task(conn: &Connection, id: i64) -> rusqlite::Result<Option<Task>> {
+    conn.query_row(
+        &format!("SELECT {TASK_COLS} FROM tasks WHERE id = ?1"),
+        [id],
+        |r| row_to_task(r),
+    )
+    .optional()
+}
+
+/// 新增或更新一筆工作項目。
+/// `id` 為 None → INSERT；為 Some → UPSERT。狀態切到 done 時自動寫入 completed_at、
+/// 切離 done 時清空。回傳含 id 與時間戳的完整 Task。
+pub fn save_task(conn: &Connection, task: &Task) -> rusqlite::Result<Task> {
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let tags_json = serde_json::to_string(&task.tags).unwrap_or_else(|_| "[]".into());
+
+    // 依目標狀態決定 completed_at：done → 沿用既有或設為現在；非 done → 清空
+    let completed_at: Option<String> = if task.status == "done" {
+        task.completed_at.clone().or_else(|| Some(now.clone()))
+    } else {
+        None
+    };
+
+    let id = match task.id {
+        Some(id) => {
+            conn.execute(
+                "UPDATE tasks SET title=?2, status=?3, project=?4, priority=?5, due_date=?6,
+                    notes=?7, tags=?8, completed_at=?9, updated_at=?10 WHERE id=?1",
+                rusqlite::params![
+                    id, task.title, task.status, task.project, task.priority, task.due_date,
+                    task.notes, tags_json, completed_at, now
+                ],
+            )?;
+            id
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO tasks (title, status, project, priority, due_date, notes, tags,
+                    completed_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                rusqlite::params![
+                    task.title, task.status, task.project, task.priority, task.due_date,
+                    task.notes, tags_json, completed_at, now
+                ],
+            )?;
+            conn.last_insert_rowid()
+        }
+    };
+
+    // 回傳寫入後的完整資料（含 created_at，由 DB 為準）
+    get_task(conn, id).map(|t| t.expect("剛寫入的 task 必定存在"))
+}
+
+/// 刪除某筆工作項目
+pub fn delete_task(conn: &Connection, id: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
     Ok(())
 }
 
