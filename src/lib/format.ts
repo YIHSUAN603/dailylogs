@@ -66,9 +66,9 @@ export function reportToEditableText(report: Report): string {
 }
 
 /**
- * 從 commits 區塊（[repo] 標頭 + "- 標題" 條列）中，
+ * 從 commits 區塊（# 專案 外層標頭 + [repo] 子標頭 + "- 標題" 條列）中，
  * 去掉「條列文字已出現在 existing 內任一 "- " 條列」的項目。
- * 某 [repo] 底下全被去除時連標頭一起略過。沒有新項目時回傳空字串。
+ * 某專案 / repo 底下全被去除時，連同其標頭一起略過。沒有新項目時回傳空字串。
  */
 export function dedupeCommits(existing: string, commits: string): string {
   const seen = new Set(
@@ -79,19 +79,27 @@ export function dedupeCommits(existing: string, commits: string): string {
       .map((l) => l.slice(2).trim()),
   );
   const out: string[] = [];
-  let pendingHeader: string | null = null;
+  let pendingProject: string | null = null; // # 專案 標頭暫存
+  let pendingRepo: string | null = null; // [repo] 標頭暫存
   for (const line of commits.split("\n")) {
     const t = line.trim();
-    if (t.startsWith("[") && t.endsWith("]")) {
-      pendingHeader = line; // 標頭暫存，底下有新 commit 才寫入
+    if (t.startsWith("# ")) {
+      pendingProject = line; // 換專案，重置 repo 標頭
+      pendingRepo = null;
+    } else if (t.startsWith("[") && t.endsWith("]")) {
+      pendingRepo = line; // 標頭暫存，底下有新 commit 才寫入
     } else if (t.startsWith("- ")) {
       const body = t.slice(2).trim();
       if (seen.has(body)) continue; // 已存在 → 跳過
       seen.add(body); // 同次附加內也不重覆
-      if (pendingHeader !== null) {
-        if (out.length > 0) out.push(""); // 段落間空行，維持 format_commits 排版
-        out.push(pendingHeader);
-        pendingHeader = null;
+      if (pendingProject !== null) {
+        if (out.length > 0) out.push(""); // 專案間空行，維持 format_commits 排版
+        out.push(pendingProject);
+        pendingProject = null;
+      }
+      if (pendingRepo !== null) {
+        out.push(pendingRepo);
+        pendingRepo = null;
       }
       out.push(line);
     }

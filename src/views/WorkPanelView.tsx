@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   emptyTask,
   TASK_STATUSES,
@@ -13,6 +13,7 @@ import * as api from "../lib/api";
 import * as ai from "../lib/ai";
 import * as exporter from "../lib/export";
 import DatePicker from "../components/DatePicker";
+import ProjectInput from "../components/ProjectInput";
 import TaskBreakdownPanel from "../components/TaskBreakdownPanel";
 
 interface Props {
@@ -59,12 +60,45 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
   const [summary, setSummary] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
   const [splitting, setSplitting] = useState(false);
+  const [importedProjects, setImportedProjects] = useState<string[]>([]);
 
-  // 既有專案清單（去重、去空）
+  // 載入先前匯入的 TFS 專案名稱
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await api.getSetting(api.TFS_PROJECTS_KEY);
+        if (raw) setImportedProjects(JSON.parse(raw));
+      } catch {
+        // 略過解析失敗
+      }
+    })();
+  }, []);
+
+  // 專案清單（任務既有 ∪ 匯入的 TFS 專案，去重、去空）
   const projects = useMemo(
-    () => Array.from(new Set(tasks.map((t) => t.project.trim()).filter(Boolean))).sort(),
-    [tasks],
+    () =>
+      Array.from(
+        new Set([
+          ...tasks.map((t) => t.project.trim()).filter(Boolean),
+          ...importedProjects,
+        ]),
+      ).sort(),
+    [tasks, importedProjects],
   );
+
+  const importProjects = async () => {
+    setBusy("匯入專案中");
+    try {
+      const list = await api.tfsListProjects();
+      await api.setSetting(api.TFS_PROJECTS_KEY, JSON.stringify(list));
+      setImportedProjects(list);
+      alert(`已匯入 ${list.length} 個專案`);
+    } catch (e) {
+      alert(`匯入失敗：${e}`);
+    } finally {
+      setBusy("");
+    }
+  };
 
   // 篩選 + 排序
   const visible = useMemo(() => {
@@ -171,6 +205,13 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
             className="rounded-md border border-accent-300 bg-accent-50 px-3 py-1.5 text-sm font-medium text-accent-700 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/30 dark:text-accent-300 dark:hover:bg-accent-900/50"
           >
             ✨ AI 拆解工項
+          </button>
+          <button
+            onClick={importProjects}
+            disabled={!!busy}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            {busy === "匯入專案中" ? "匯入中…" : "匯入 TFS 專案"}
           </button>
           <button
             onClick={onClose}
@@ -312,19 +353,12 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
             </label>
             <label className="flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
               專案
-              <input
-                type="text"
-                list="work-panel-projects"
+              <ProjectInput
                 value={editing.project}
-                onChange={(e) => setEditing({ ...editing, project: e.target.value })}
-                placeholder="（可空）"
-                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                onChange={(v) => setEditing({ ...editing, project: v })}
+                projects={projects}
+                inputClassName="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
               />
-              <datalist id="work-panel-projects">
-                {projects.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
             </label>
             <div className="flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
               <span>截止日</span>

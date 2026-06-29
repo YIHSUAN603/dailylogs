@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { emptyTask, TASK_PRIORITIES, type Task, type TaskPriority } from "../types";
 import * as api from "../lib/api";
 import * as ai from "../lib/ai";
+import ProjectInput from "./ProjectInput";
 
 interface Props {
   projects: string[];
@@ -110,19 +111,12 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
               預設專案
-              <input
-                type="text"
-                list="task-breakdown-projects"
+              <ProjectInput
                 value={defaultProject}
-                onChange={(e) => setDefaultProject(e.target.value)}
-                placeholder="（可空）"
-                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                onChange={setDefaultProject}
+                projects={projects}
+                inputClassName="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
               />
-              <datalist id="task-breakdown-projects">
-                {projects.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
             </label>
             <button
               onClick={importFile}
@@ -172,13 +166,11 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
                   <div className="flex flex-wrap gap-3">
                     <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                       專案
-                      <input
-                        type="text"
-                        list="task-breakdown-projects"
+                      <ProjectInput
                         value={d.project}
-                        onChange={(e) => patch(i, { project: e.target.value })}
-                        placeholder="（可空）"
-                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                        onChange={(v) => patch(i, { project: v })}
+                        projects={projects}
+                        inputClassName="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                       />
                     </label>
                     <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">

@@ -256,3 +256,10 @@ pub async fn tfs_test_connection(state: State<'_, DbState>) -> Result<usize, Str
     let cfg = load_tfs_config(&state)?;
     tfs::count_repos(&cfg).await
 }
+
+/// 列出所有 collection 的團隊專案名稱（給工作面板匯入專案用）。
+#[tauri::command]
+pub async fn tfs_list_projects(state: State<'_, DbState>) -> Result<Vec<String>, String> {
+    let cfg = load_tfs_config(&state)?;
+    tfs::list_projects(&cfg).await
+}

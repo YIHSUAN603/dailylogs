@@ -48,6 +48,7 @@ pub fn run() {
             commands::run_ai,
             commands::git_collect_commits,
             commands::tfs_test_connection,
+            commands::tfs_list_projects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
