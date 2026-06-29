@@ -135,14 +135,62 @@ ${doingText}`;
   return (await runAi(prompt)).trim();
 }
 
-/** 把一個大任務拆解成 Markdown 待辦清單（checklist），回傳 Markdown 文字 */
-export async function breakdownTask(title: string, notes: string): Promise<string> {
-  const base = notes.trim() ? `${title.trim()}\n\n補充：${notes.trim()}` : title.trim();
-  const prompt = `請把以下這個工作任務，拆解成可執行的子步驟，輸出成 Markdown 待辦清單（checklist）。每個步驟一行、以「- [ ] 」開頭，用語精簡具體，由先到後排序。只輸出清單本身，不要任何前言或結語。
+/** AI 拆解出的單筆工項草稿 */
+export interface TaskDraft {
+  title: string;
+  notes: string;
+}
 
-【任務】
-${base}`;
-  return (await runAi(prompt)).trim();
+/** 從 AI 回應中解析出工項草稿：先試 JSON 陣列，失敗則退回逐行抓條列 */
+function parseTaskDrafts(raw: string): TaskDraft[] {
+  // 容忍 ```json 包裹或多餘前後文：抓第一個 [ 到最後一個 ]
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  if (start !== -1 && end > start) {
+    try {
+      const arr = JSON.parse(raw.slice(start, end + 1));
+      if (Array.isArray(arr)) {
+        const drafts = arr
+          .map((o): TaskDraft => ({
+            title: typeof o?.title === "string" ? o.title.trim() : "",
+            notes: typeof o?.notes === "string" ? o.notes.trim() : "",
+          }))
+          .filter((d) => d.title);
+        if (drafts.length) return drafts;
+      }
+    } catch {
+      // 落到下方 fallback
+    }
+  }
+  // Fallback：逐行抓以 - / * / 數字. 開頭的行當標題
+  const drafts = raw
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s+/, "").trim())
+    .filter(Boolean)
+    .map((title): TaskDraft => ({ title, notes: "" }));
+  return drafts;
+}
+
+/**
+ * 把一段工作描述/文件內容拆成多筆可獨立執行的工項（每筆含標題 + 細節），
+ * 回傳草稿陣列。AI 輸出無法解析或為空則丟出錯誤。
+ */
+export async function breakdownToTasks(input: string): Promise<TaskDraft[]> {
+  const prompt = `請把以下這段工作描述（可能是一個大任務，或一份文件/筆記）拆解成數筆「可以各自獨立執行、追蹤的工作項目」。
+
+要求：
+- 每筆工項給一個精簡具體的「標題」，與一段「細節說明」（notes，可含要做的步驟、驗收要點或注意事項）。
+- 依執行先後或重要性排序；粒度適中，不要細到瑣碎、也不要籠統到無法執行。
+- 只根據提供的內容拆解，不要臆測或杜撰未提及的工作。
+- 用繁體中文。
+- 「只」輸出一個 JSON 陣列，格式為 [{"title": "...", "notes": "..."}]，不要任何前言、結語、說明或程式碼框（不要 \`\`\`）。
+
+【工作描述】
+${input.trim()}`;
+  const out = await runAi(prompt);
+  const drafts = parseTaskDrafts(out);
+  if (!drafts.length) throw new Error("AI 沒有拆出可用的工項");
+  return drafts;
 }
 
 /** 把某專案的所有工作項目彙整成進度報告，回傳 Markdown 文字 */

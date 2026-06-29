@@ -13,6 +13,7 @@ import * as api from "../lib/api";
 import * as ai from "../lib/ai";
 import * as exporter from "../lib/export";
 import DatePicker from "../components/DatePicker";
+import TaskBreakdownPanel from "../components/TaskBreakdownPanel";
 
 interface Props {
   tasks: Task[];
@@ -57,6 +58,7 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
   const [busy, setBusy] = useState("");
   const [summary, setSummary] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [splitting, setSplitting] = useState(false);
 
   // 既有專案清單（去重、去空）
   const projects = useMemo(
@@ -92,12 +94,19 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
 
   const openNew = () => {
     setConfirmDel(false);
+    setSplitting(false);
     setEditing(emptyTask());
   };
 
   const openEdit = (t: Task) => {
     setConfirmDel(false);
+    setSplitting(false);
     setEditing({ ...t });
+  };
+
+  const openSplit = () => {
+    setEditing(null);
+    setSplitting(true);
   };
 
   const save = async () => {
@@ -132,23 +141,6 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
     }
   };
 
-  const breakdown = async () => {
-    if (!editing?.title.trim()) {
-      alert("請先輸入標題");
-      return;
-    }
-    setBusy("AI 拆解中");
-    try {
-      const checklist = await ai.breakdownTask(editing.title, editing.notes);
-      const prefix = editing.notes.trim() ? `${editing.notes.trimEnd()}\n\n` : "";
-      setEditing({ ...editing, notes: `${prefix}${checklist}` });
-    } catch (e) {
-      alert(`AI 拆解失敗：${e}`);
-    } finally {
-      setBusy("");
-    }
-  };
-
   const summarizeProject = async () => {
     if (projectFilter === "all") return;
     const ofProject = tasks.filter((t) => t.project.trim() === projectFilter);
@@ -173,6 +165,12 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
             className="rounded-md bg-accent-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
           >
             + 新增工作項目
+          </button>
+          <button
+            onClick={openSplit}
+            className="rounded-md border border-accent-300 bg-accent-50 px-3 py-1.5 text-sm font-medium text-accent-700 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/30 dark:text-accent-300 dark:hover:bg-accent-900/50"
+          >
+            ✨ AI 拆解工項
           </button>
           <button
             onClick={onClose}
@@ -259,6 +257,15 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
             {summary}
           </pre>
         </div>
+      )}
+
+      {/* AI 拆解工項 */}
+      {splitting && (
+        <TaskBreakdownPanel
+          projects={projects}
+          onCreated={onChanged}
+          onClose={() => setSplitting(false)}
+        />
       )}
 
       {/* 編輯卡 */}
@@ -357,7 +364,7 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
           <textarea
             value={editing.notes}
             onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
-            placeholder="細節 / 進度（Markdown，可用「AI 拆解」自動產生子步驟）"
+            placeholder="細節 / 進度（Markdown）"
             rows={5}
             className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
           />
@@ -368,13 +375,6 @@ export default function WorkPanelView({ tasks, onChanged, onClose }: Props) {
               className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               {busy === "儲存中" ? "儲存中…" : "儲存"}
-            </button>
-            <button
-              onClick={breakdown}
-              disabled={!!busy}
-              className="rounded-md border border-accent-300 bg-accent-50 px-3 py-1.5 text-sm text-accent-700 hover:bg-accent-100 disabled:opacity-50 dark:border-accent-700 dark:bg-accent-900/30 dark:text-accent-300 dark:hover:bg-accent-900/50"
-            >
-              {busy === "AI 拆解中" ? "AI 拆解中…" : "AI 拆解"}
             </button>
             <button
               onClick={() => setEditing(null)}
