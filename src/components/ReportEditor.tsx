@@ -104,8 +104,7 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
           accent
           disabled={!!aiBusy}
           onClick={runAi("整理成正式報告", async () => {
-            if (!report.raw_notes.trim()) throw new Error("內容是空的，先寫點東西");
-            onChange({ raw_notes: await ai.organizeReport(report) });
+            onChange({ raw_notes: await ai.organizeReport(report, tasks) });
           })}
         >
           整理成正式報告
@@ -144,17 +143,6 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
           })}
         >
           從 Git 草擬
-        </ToolBtn>
-        <ToolBtn
-          accent
-          disabled={!!aiBusy}
-          onClick={runAi("從工作項目草擬", async () => {
-            const draft = await ai.draftReportFromTasks(tasks, report.date);
-            const existing = report.raw_notes.trimEnd();
-            onChange({ raw_notes: existing ? `${existing}\n\n${draft}` : draft });
-          })}
-        >
-          從工作項目草擬
         </ToolBtn>
 
         <span className="ml-3 text-xs text-slate-400 dark:text-slate-500">輸出：</span>

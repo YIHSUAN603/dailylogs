@@ -35,9 +35,29 @@ const FORMAT_RULE = `請「只」輸出以「專案（大類）> 子分類 > 四
 - 每個項目自成一行、以「- 」開頭，用語精簡專業。
 - 依專案歸納；若實在無法判斷專案，可只用一個專案名涵蓋。`;
 
-/** 零散記事 + 草稿 → 分類為主的日報（回傳 Markdown 文字） */
-export async function organizeReport(report: Report): Promise<string> {
-  const prompt = `你是協助工程師撰寫「對主管的工作日報」的助理。請根據下方「零散記事」與「目前草稿」，整理成專業、條列清楚、以分類為主的繁體中文日報，並讓主管讀了不會想追問或挑語病。請依專案或主題歸納分類。
+/** 零散記事 + 草稿 + 工作面板工項 → 分類為主的日報（回傳 Markdown 文字） */
+export async function organizeReport(report: Report, tasks: Task[]): Promise<string> {
+  const doneToday = tasks.filter(
+    (t) => t.status === "done" && (t.completed_at ?? "").slice(0, 10) === report.date,
+  );
+  const doing = tasks.filter((t) => t.status === "doing");
+
+  if (!report.raw_notes.trim() && doneToday.length === 0 && doing.length === 0) {
+    throw new Error("沒有內容可整理（記事與工作項目都是空的）");
+  }
+
+  const taskBlock =
+    doneToday.length || doing.length
+      ? `
+
+【工作面板：今天完成的項目】
+${doneToday.length ? doneToday.map(taskLine).join("\n") : "（無）"}
+
+【工作面板：進行中的項目】
+${doing.length ? doing.map(taskLine).join("\n") : "（無）"}`
+      : "";
+
+  const prompt = `你是協助工程師撰寫「對主管的工作日報」的助理。請根據下方「零散記事」「目前草稿」與「工作面板的工作項目」，整理成專業、條列清楚、以分類為主的繁體中文日報，並讓主管讀了不會想追問或挑語病。請依專案或主題歸納分類。
 
 整理時請特別注意：
 - 用詞具體明確，避免「處理了一些」「做了相關調整」「優化了一下」這類含糊籠統的寫法；說清楚做了什麼、影響什麼。
@@ -45,7 +65,8 @@ export async function organizeReport(report: Report): Promise<string> {
 - 移除「應該」「大概」「可能」等不確定語氣（除非確實是待確認事項，則明確標示為待確認）。
 - 成果能量化就量化（數量、時間、版本、影響範圍），讓主管一眼看出價值。
 - 精簡贅字與口語，語氣平實專業，不誇大也不卑微。
-- 只根據提供的記事與草稿整理，不要臆測或杜撰未提及的內容。
+- 只根據提供的記事、草稿與工作項目整理，不要臆測或杜撰未提及的內容。
+- 同一件事若同時出現在記事與工作項目，請歸併為一條、不要重複列。
 
 ${FORMAT_RULE}
 
@@ -53,7 +74,7 @@ ${FORMAT_RULE}
 ${report.raw_notes.trim() || "（無）"}
 
 【目前草稿】
-${draftText(report)}`;
+${draftText(report)}${taskBlock}`;
   return (await runAi(prompt)).trim();
 }
 
@@ -99,40 +120,6 @@ function taskLine(t: Task): string {
   const proj = t.project.trim() ? `[${t.project.trim()}] ` : "";
   const notes = t.notes.trim() ? `（細節：${t.notes.trim().replace(/\s+/g, " ")}）` : "";
   return `- ${proj}${t.title.trim()}（狀態：${TASK_STATUS_LABELS[t.status]}）${notes}`;
-}
-
-/**
- * 從「今天動過的工作項目」草擬當日日報：
- * 收集今天完成（completed_at 為當天）+ 所有進行中的項目，請 AI 產出日報 Markdown。
- * 若沒有可用項目則丟出錯誤。
- */
-export async function draftReportFromTasks(tasks: Task[], date: string): Promise<string> {
-  const doneToday = tasks.filter(
-    (t) => t.status === "done" && (t.completed_at ?? "").slice(0, 10) === date,
-  );
-  const doing = tasks.filter((t) => t.status === "doing");
-  if (doneToday.length === 0 && doing.length === 0) {
-    throw new Error("今天沒有完成或進行中的工作項目");
-  }
-
-  const doneText = doneToday.length ? doneToday.map(taskLine).join("\n") : "（無）";
-  const doingText = doing.length ? doing.map(taskLine).join("\n") : "（無）";
-
-  const prompt = `你是協助工程師撰寫「對主管的工作日報」的助理。以下是我今天（${date}）在工作面板上「已完成」與「進行中」的工作項目。請據此整理成一份專業、條列清楚、以分類為主的繁體中文日報初稿。
-
-整理時請特別注意：
-- 只根據提供的項目整理，不要臆測或杜撰未提及的內容。
-- 用詞具體明確，避免含糊籠統的寫法；完成的用肯定語氣，進行中的標明在進行中。
-- 成果能量化就量化（數量、版本、影響範圍）。
-
-${FORMAT_RULE}
-
-【今天完成的項目】
-${doneText}
-
-【進行中的項目】
-${doingText}`;
-  return (await runAi(prompt)).trim();
 }
 
 /** AI 拆解出的單筆工項草稿 */
