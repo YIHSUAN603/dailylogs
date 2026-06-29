@@ -372,7 +372,7 @@ pub fn list_tasks(conn: &Connection) -> rusqlite::Result<Vec<Task>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_COLS} FROM tasks ORDER BY updated_at DESC"
     ))?;
-    let rows = stmt.query_map([], |r| row_to_task(r))?;
+    let rows = stmt.query_map([], row_to_task)?;
     rows.collect()
 }
 
@@ -381,7 +381,7 @@ pub fn get_task(conn: &Connection, id: i64) -> rusqlite::Result<Option<Task>> {
     conn.query_row(
         &format!("SELECT {TASK_COLS} FROM tasks WHERE id = ?1"),
         [id],
-        |r| row_to_task(r),
+        row_to_task,
     )
     .optional()
 }
