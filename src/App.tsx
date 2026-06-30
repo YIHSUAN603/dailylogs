@@ -4,6 +4,7 @@ import ReportEditor from "./components/ReportEditor";
 import SettingsView from "./views/SettingsView";
 import WeeklyView from "./views/WeeklyView";
 import WorkPanelView from "./views/WorkPanelView";
+import CalendarView from "./views/CalendarView";
 import { emptyReport, type Report, type ReportMeta, type SearchHit, type Task } from "./types";
 import { todayStr } from "./lib/format";
 import * as api from "./lib/api";
@@ -25,7 +26,9 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [view, setView] = useState<"editor" | "settings" | "weekly" | "tasks">("editor");
+  const [view, setView] = useState<"editor" | "settings" | "weekly" | "tasks" | "calendar">(
+    "editor",
+  );
   const [search, setSearch] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [error, setError] = useState("");
@@ -200,6 +203,7 @@ export default function App() {
         onOpenSettings={() => setView("settings")}
         onOpenWeekly={() => setView("weekly")}
         onOpenTasks={() => setView("tasks")}
+        onOpenCalendar={() => setView("calendar")}
       />
       <main className="flex-1 overflow-y-auto">
         {view === "settings" ? (
@@ -214,6 +218,8 @@ export default function App() {
           <WeeklyView onClose={() => setView("editor")} dark={dark} />
         ) : view === "tasks" ? (
           <WorkPanelView tasks={tasks} onChanged={refreshTasks} onClose={() => setView("editor")} />
+        ) : view === "calendar" ? (
+          <CalendarView tasks={tasks} onChanged={refreshTasks} onClose={() => setView("editor")} />
         ) : report ? (
           <ReportEditor
             report={report}

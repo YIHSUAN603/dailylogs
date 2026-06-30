@@ -107,6 +107,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenWeekly: () => void;
   onOpenTasks: () => void;
+  onOpenCalendar: () => void;
 }
 
 /** 狀態 badge（草稿/完成） */
@@ -159,6 +160,7 @@ export default function Sidebar({
   onOpenSettings,
   onOpenWeekly,
   onOpenTasks,
+  onOpenCalendar,
 }: Props) {
   const searching = search.trim().length > 0;
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -305,6 +307,12 @@ export default function Sidebar({
         className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
       >
         🗂 工作面板
+      </button>
+      <button
+        onClick={onOpenCalendar}
+        className="border-t border-slate-200 px-4 py-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+      >
+        📆 日曆
       </button>
       <button
         onClick={onOpenWeekly}
