@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Calendar, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import type { ReportMeta, SearchHit } from "../types";
 import { todayStr } from "../lib/format";
 
@@ -6,7 +7,15 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
 
 /** 自繪月曆（不依賴原生 picker，開關完全可控）。選某天即回傳 YYYY-MM-DD */
-function MonthCalendar({ value, onSelect }: { value: string; onSelect: (date: string) => void }) {
+function MonthCalendar({
+  value,
+  onSelect,
+  reportDates,
+}: {
+  value: string;
+  onSelect: (date: string) => void;
+  reportDates: Map<string, ReportMeta["status"]>;
+}) {
   const base = value ? new Date(value + "T00:00:00") : new Date();
   const [view, setView] = useState({ y: base.getFullYear(), m: base.getMonth() }); // m: 0-11
   const today = todayStr();
@@ -21,18 +30,23 @@ function MonthCalendar({ value, onSelect }: { value: string; onSelect: (date: st
     const d = new Date(view.y, view.m + delta, 1);
     setView({ y: d.getFullYear(), m: d.getMonth() });
   };
+  const goToday = () => {
+    const d = new Date();
+    setView({ y: d.getFullYear(), m: d.getMonth() });
+    onSelect(today);
+  };
 
   return (
     <div className="w-60 rounded-md border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-center justify-between px-1 pb-1">
-        <button onClick={() => shift(-1)} aria-label="上個月" className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
-          ‹
+        <button onClick={() => shift(-1)} aria-label="上個月" className="flex items-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
+          <ChevronLeft size={16} />
         </button>
         <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
           {view.y} 年 {view.m + 1} 月
         </span>
-        <button onClick={() => shift(1)} aria-label="下個月" className="rounded px-2 py-0.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
-          ›
+        <button onClick={() => shift(1)} aria-label="下個月" className="flex items-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
+          <ChevronRight size={16} />
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0.5 text-center text-xs">
@@ -46,11 +60,17 @@ function MonthCalendar({ value, onSelect }: { value: string; onSelect: (date: st
           const ds = `${view.y}-${pad2(view.m + 1)}-${pad2(d)}`;
           const isToday = ds === today;
           const isSel = ds === value;
+          const status = reportDates.get(ds);
+          const dotColor = isSel
+            ? "bg-white/80"
+            : status === "final"
+              ? "bg-emerald-500"
+              : "bg-amber-500";
           return (
             <button
               key={i}
               onClick={() => onSelect(ds)}
-              className={`rounded py-1 hover:bg-accent-100 dark:hover:bg-accent-900/40 ${
+              className={`relative rounded py-1 transition-colors hover:bg-accent-100 dark:hover:bg-accent-900/40 ${
                 isSel
                   ? "bg-accent-600 text-white hover:bg-accent-600"
                   : isToday
@@ -59,10 +79,19 @@ function MonthCalendar({ value, onSelect }: { value: string; onSelect: (date: st
               }`}
             >
               {d}
+              {status && (
+                <span className={`absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full ${dotColor}`} />
+              )}
             </button>
           );
         })}
       </div>
+      <button
+        onClick={goToday}
+        className="mt-1 w-full rounded py-1 text-center text-xs font-medium text-accent-600 transition-colors hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-900/30"
+      >
+        回到今日
+      </button>
     </div>
   );
 }
@@ -135,7 +164,11 @@ export default function Sidebar({
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const activeDate = selectedDate || todayStr();
-  const isToday = activeDate === todayStr();
+  const reportDates = useMemo(() => {
+    const m = new Map<string, ReportMeta["status"]>();
+    for (const r of reports) m.set(r.date, r.status);
+    return m;
+  }, [reports]);
 
   // 點月曆外 / 按 Esc 收合
   useEffect(() => {
@@ -156,27 +189,29 @@ export default function Sidebar({
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-center justify-between px-4 py-3">
         <h1 className="text-base font-bold text-slate-800 dark:text-slate-100">日報告</h1>
-        <div ref={pickerRef} className="relative flex items-center">
-          {/* split button：左邊開啟目前日期（預設今日），右邊小箭頭展開自繪月曆 */}
+        <div ref={pickerRef} className="relative flex items-stretch">
+          {/* split button：左邊固定開啟今日，右邊月曆鈕展開自繪月曆選其他日期 */}
           <button
-            onClick={() => onPickDate(activeDate)}
-            className="rounded-l-md bg-accent-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-accent-700"
+            onClick={() => onPickDate(todayStr())}
+            title="開啟今日日報"
+            className="flex items-center gap-1 rounded-l-md bg-accent-600 px-2.5 py-1 text-sm font-medium text-white transition-colors hover:bg-accent-700 active:bg-accent-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
           >
-            + {isToday ? "今日" : activeDate.slice(5)}
+            <Plus size={14} strokeWidth={2.5} /> 今日
           </button>
           <button
             onClick={() => setPickerOpen((v) => !v)}
             title="選擇其他日期"
             aria-label="選擇其他日期"
             aria-expanded={pickerOpen}
-            className="rounded-r-md border-l border-accent-500 bg-accent-600 px-1.5 py-1 text-sm text-white hover:bg-accent-700"
+            className="flex items-center rounded-r-md border-l border-accent-500 bg-accent-600 px-1.5 py-1 text-white transition-colors hover:bg-accent-700 active:bg-accent-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
           >
-            ▾
+            <Calendar size={15} />
           </button>
           {pickerOpen && (
             <div className="absolute right-0 top-full z-10 mt-1">
               <MonthCalendar
                 value={activeDate}
+                reportDates={reportDates}
                 onSelect={(date) => {
                   onPickDate(date);
                   setPickerOpen(false); // 選完即關閉
