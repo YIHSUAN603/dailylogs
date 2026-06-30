@@ -1,0 +1,17 @@
+#!/bin/sh
+# pre-push：本機快速檢查，沒過就中止 push（可用 git push --no-verify 緊急跳過）
+set -e
+
+# cargo 在非登入 shell 可能不在 PATH（見 CLAUDE.md）
+export PATH="$HOME/.cargo/bin:$PATH"
+
+echo "▶ tsc 型別檢查…"
+npm run typecheck
+
+echo "▶ ESLint…"
+npm run lint
+
+echo "▶ cargo fmt --check…"
+( cd src-tauri && cargo fmt --all -- --check )
+
+echo "✓ pre-push 檢查通過"

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prepare": "git config core.hooksPath .githooks",
+    "typecheck": "tsc",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
