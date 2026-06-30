@@ -9,14 +9,16 @@ import {
   type TaskStatus,
   type TaskPriority,
 } from "../types";
-import * as api from "../lib/api";
 import { todayStr } from "../lib/format";
-import TaskEditCard from "../components/TaskEditCard";
 
 interface Props {
   tasks: Task[];
-  onChanged: () => Promise<void>;
-  onClose: () => void;
+  projects: string[];
+  statusFilter: TaskStatus | "all";
+  onStatusFilterChange: (s: TaskStatus | "all") => void;
+  projectFilter: string;
+  onProjectFilterChange: (p: string) => void;
+  onEdit: (t: Task) => void;
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -53,33 +55,28 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 }
 
 /** 月曆檢視：把工作面板的任務依截止日 / 完成日落在格子上 */
-export default function CalendarView({ tasks, onChanged, onClose }: Props) {
+export default function TaskCalendarPanel({
+  tasks,
+  projects,
+  statusFilter,
+  onStatusFilterChange,
+  projectFilter,
+  onProjectFilterChange,
+  onEdit,
+}: Props) {
   const today = todayStr();
   const base = new Date(today + "T00:00:00");
   const [ym, setYm] = useState({ y: base.getFullYear(), m: base.getMonth() }); // m: 0-11
-  const [editing, setEditing] = useState<Task | null>(null);
   const [dayPanel, setDayPanel] = useState<string | null>(null); // 當日詳情抽屜的日期
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
-  const [projectFilter, setProjectFilter] = useState<string>("all");
   const [hideDone, setHideDone] = useState(false);
 
-  // Esc 關閉：先關浮層、再關抽屜
+  // Esc 關閉當日抽屜
   useEffect(() => {
-    if (!editing && !dayPanel) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (editing) setEditing(null);
-      else setDayPanel(null);
-    };
+    if (!dayPanel) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDayPanel(null);
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [editing, dayPanel]);
-
-  // 專案清單（供編輯卡的專案下拉）：取自既有任務
-  const projects = useMemo(
-    () => Array.from(new Set(tasks.map((t) => t.project.trim()).filter(Boolean))).sort(),
-    [tasks],
-  );
+  }, [dayPanel]);
 
   // 篩選 → 依日期分桶。due = 截止日落該天；done = 當天標記完成（completed_at 取前 10 碼）
   const byDate = useMemo(() => {
@@ -126,17 +123,6 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
     setYm({ y: d.getFullYear(), m: d.getMonth() });
   };
 
-  const saveTask = async (t: Task) => {
-    await api.saveTask(t);
-    await onChanged();
-    setEditing(null);
-  };
-  const removeTask = async (id: number) => {
-    await api.deleteTask(id);
-    await onChanged();
-    setEditing(null);
-  };
-
   const isOverdue = (e: Entry) =>
     e.due && !!e.task.due_date && e.task.due_date < today && e.task.status !== "done";
 
@@ -149,10 +135,10 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
   const panelEntries = dayPanel ? byDate.get(dayPanel) ?? [] : [];
 
   return (
-    <div className="mx-auto max-w-6xl p-8">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">日曆</h2>
-        <div className="flex items-center gap-2">
+    <>
+      {/* 月份導覽 + 篩選（同一列） */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             onClick={() => shift(-1)}
             aria-label="上個月"
@@ -176,22 +162,12 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
           >
             本月
           </button>
-          <button
-            onClick={onClose}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            返回
-          </button>
         </div>
-      </div>
-
-      {/* 篩選列 */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
           {(["all", ...TASK_STATUSES.map((s) => s.key)] as const).map((s) => (
             <button
               key={s}
-              onClick={() => setStatusFilter(s)}
+              onClick={() => onStatusFilterChange(s)}
               className={`rounded-md px-3 py-1 text-sm transition-colors ${
                 statusFilter === s
                   ? "bg-white font-medium text-accent-700 shadow-sm dark:bg-slate-700 dark:text-accent-300"
@@ -204,7 +180,7 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
         </div>
         <select
           value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
+          onChange={(e) => onProjectFilterChange(e.target.value)}
           className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
         >
           <option value="all">所有專案</option>
@@ -286,7 +262,7 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setEditing({ ...emptyTask(), due_date: ds });
+                    onEdit({ ...emptyTask(), due_date: ds });
                   }}
                   aria-label="新增該日工作項目"
                   className="rounded px-1 text-xs text-slate-400 opacity-0 hover:bg-slate-200 group-hover:opacity-100 dark:text-slate-500 dark:hover:bg-slate-600"
@@ -300,7 +276,7 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
                     key={e.task.id}
                     onClick={(ev) => {
                       ev.stopPropagation();
-                      setEditing({ ...e.task });
+                      onEdit({ ...e.task });
                     }}
                     title={e.task.title}
                     className={chipClass(e)}
@@ -343,7 +319,7 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
             </div>
             <div className="border-b border-slate-200 px-4 py-2 dark:border-slate-700">
               <button
-                onClick={() => setEditing({ ...emptyTask(), due_date: dayPanel })}
+                onClick={() => onEdit({ ...emptyTask(), due_date: dayPanel })}
                 className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
               >
                 + 新增工作項目
@@ -359,7 +335,7 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
                   {panelEntries.map((e) => (
                     <li key={e.task.id}>
                       <button
-                        onClick={() => setEditing({ ...e.task })}
+                        onClick={() => onEdit({ ...e.task })}
                         className="flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700/50"
                       >
                         <span className="flex items-center gap-2">
@@ -408,25 +384,6 @@ export default function CalendarView({ tasks, onChanged, onClose }: Props) {
           </div>
         </div>
       )}
-
-      {/* 編輯 / 新增浮層 */}
-      {editing && (
-        <div
-          className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/40 p-6 backdrop-blur-sm"
-          onClick={() => setEditing(null)}
-        >
-          <div className="mt-10 w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
-            <TaskEditCard
-              key={editing.id ?? "new"}
-              task={editing}
-              projects={projects}
-              onSave={saveTask}
-              onDelete={removeTask}
-              onCancel={() => setEditing(null)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
