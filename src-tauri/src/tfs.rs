@@ -327,3 +327,78 @@ pub fn format_commits(repos: &[RepoCommits]) -> String {
     }
     lines.join("\n").trim().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn commit(author: &str, date: &str) -> CommitItem {
+        CommitItem {
+            comment: Some("fix: 修正".into()),
+            author: Some(CommitUser {
+                name: Some(author.into()),
+                date: Some(date.into()),
+            }),
+        }
+    }
+
+    #[test]
+    fn author_empty_passes_all() {
+        assert!(author_matches(&commit("Anyone", "x"), &[]));
+    }
+
+    #[test]
+    fn author_contains_case_insensitive() {
+        let authors = vec!["ARIESCHAO".to_string()];
+        assert!(author_matches(&commit("arieschao-nb\\user", "x"), &authors));
+        assert!(!author_matches(&commit("someone", "x"), &authors));
+    }
+
+    #[test]
+    fn commit_on_date_converts_to_local() {
+        // 用本機時區的當日中午組時間，避免測試依賴特定時區
+        let target = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let noon = Local
+            .with_ymd_and_hms(2026, 7, 1, 12, 0, 0)
+            .unwrap()
+            .to_rfc3339();
+        let c = commit("a", &noon);
+        assert!(commit_on_date(&c, target));
+        assert!(!commit_on_date(
+            &c,
+            NaiveDate::from_ymd_opt(2026, 7, 2).unwrap()
+        ));
+        // 沒有作者時間 → 不通過
+        let no_date = CommitItem {
+            comment: Some("x".into()),
+            author: None,
+        };
+        assert!(!commit_on_date(&no_date, target));
+    }
+
+    #[test]
+    fn format_commits_groups_by_project() {
+        let repos = vec![
+            RepoCommits {
+                project: "A".into(),
+                repo: "r1".into(),
+                commits: vec!["c1".into()],
+            },
+            RepoCommits {
+                project: "A".into(),
+                repo: "r2".into(),
+                commits: vec!["c2".into()],
+            },
+            RepoCommits {
+                project: "B".into(),
+                repo: "r3".into(),
+                commits: vec!["c3".into()],
+            },
+        ];
+        assert_eq!(
+            format_commits(&repos),
+            "# A\n[r1]\n- c1\n[r2]\n- c2\n\n# B\n[r3]\n- c3"
+        );
+    }
+}
