@@ -1,5 +1,6 @@
 use crate::ai;
 use crate::db::{self, Report, ReportMeta, Summary, SummaryMeta, Task};
+use crate::secret;
 use crate::tfs::{self, TfsConfig};
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -15,7 +16,6 @@ const DEFAULT_AI_COMMAND: &str = "claude -p";
 /// TFS 設定 key
 const TFS_BASE_URL_KEY: &str = "tfs_base_url";
 const TFS_COLLECTIONS_KEY: &str = "tfs_collections"; // JSON 字串陣列
-const TFS_PAT_KEY: &str = "tfs_pat";
 const GIT_AUTHOR_KEY: &str = "git_author"; // 作者比對關鍵字（逗號分隔，包含比對）
 
 /// AI 逾時秒數設定 key 與預設值
@@ -96,12 +96,6 @@ pub fn list_tasks(state: State<DbState>) -> Result<Vec<Task>, String> {
     db::list_tasks(&conn).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn get_task(state: State<DbState>, id: i64) -> Result<Option<Task>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-    db::get_task(&conn, id).map_err(|e| e.to_string())
-}
-
 /// 新增/更新一筆工作項目，回傳寫入後的完整 Task
 #[tauri::command]
 pub fn save_task(state: State<DbState>, task: Task) -> Result<Task, String> {
@@ -162,6 +156,20 @@ pub fn set_setting(state: State<DbState>, key: String, value: String) -> Result<
     db::set_setting(&conn, &key, &value).map_err(|e| e.to_string())
 }
 
+/// 讀取 TFS PAT（keychain 優先，退回 settings 表），沒有時回傳空字串
+#[tauri::command]
+pub fn get_tfs_pat(state: State<DbState>) -> Result<String, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    secret::get_pat(&conn)
+}
+
+/// 寫入 TFS PAT（keychain 優先，退回 settings 表）
+#[tauri::command]
+pub fn set_tfs_pat(state: State<DbState>, value: String) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    secret::set_pat(&conn, &value)
+}
+
 #[tauri::command]
 pub fn get_report_tags(state: State<DbState>, date: String) -> Result<Vec<String>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -204,9 +212,7 @@ fn load_tfs_config(state: &State<DbState>) -> Result<TfsConfig, String> {
         .unwrap_or_default();
     let collections_json =
         db::get_setting(&conn, TFS_COLLECTIONS_KEY).map_err(|e| e.to_string())?;
-    let pat = db::get_setting(&conn, TFS_PAT_KEY)
-        .map_err(|e| e.to_string())?
-        .unwrap_or_default();
+    let pat = secret::get_pat(&conn)?;
     let author = db::get_setting(&conn, GIT_AUTHOR_KEY)
         .map_err(|e| e.to_string())?
         .unwrap_or_default();

@@ -56,11 +56,6 @@ export function listTasks(): Promise<Task[]> {
   return invoke("list_tasks");
 }
 
-/** 取得某筆工作項目，不存在回傳 null */
-export function getTask(id: number): Promise<Task | null> {
-  return invoke("get_task", { id });
-}
-
 /** 新增/更新一筆工作項目，回傳寫入後的完整 Task */
 export function saveTask(task: Task): Promise<Task> {
   return invoke("save_task", { task });
@@ -79,6 +74,16 @@ export function getSetting(key: string): Promise<string | null> {
 /** 寫入設定值 */
 export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
+}
+
+/** 讀取 TFS PAT（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
+export function getTfsPat(): Promise<string> {
+  return invoke("get_tfs_pat");
+}
+
+/** 寫入 TFS PAT（OS keychain 優先，退回 settings 表） */
+export function setTfsPat(value: string): Promise<void> {
+  return invoke("set_tfs_pat", { value });
 }
 
 /** 取得某日標籤 */
@@ -130,8 +135,7 @@ export function importAll(json: string): Promise<number> {
 export const AI_COMMAND_KEY = "ai_command";
 export const TFS_BASE_URL_KEY = "tfs_base_url";
 export const TFS_COLLECTIONS_KEY = "tfs_collections"; // JSON 字串陣列
-export const TFS_PAT_KEY = "tfs_pat";
 export const GIT_AUTHOR_KEY = "git_author"; // 作者比對關鍵字（逗號分隔，包含比對）
 export const TFS_PROJECTS_KEY = "tfs_projects"; // 匯入的 TFS 專案名稱（JSON 陣列）
 export const THEME_ACCENT_KEY = "theme_accent"; // 主色名稱（AccentName）
-export const THEME_MODE_KEY = "theme_mode"; // 淺/深色模式（light | dark）
+export const THEME_MODE_KEY = "theme_mode"; // 淺/深色模式（light | dark | system）

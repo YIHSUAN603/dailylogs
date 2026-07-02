@@ -1,6 +1,7 @@
 mod ai;
 mod commands;
 mod db;
+mod secret;
 mod tfs;
 
 use commands::DbState;
@@ -33,7 +34,6 @@ pub fn run() {
             commands::get_summary,
             commands::delete_summary,
             commands::list_tasks,
-            commands::get_task,
             commands::save_task,
             commands::delete_task,
             commands::write_text_file,
@@ -43,6 +43,8 @@ pub fn run() {
             commands::import_all,
             commands::get_setting,
             commands::set_setting,
+            commands::get_tfs_pat,
+            commands::set_tfs_pat,
             commands::get_report_tags,
             commands::set_report_tags,
             commands::run_ai,

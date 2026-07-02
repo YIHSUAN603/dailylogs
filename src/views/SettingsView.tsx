@@ -6,9 +6,12 @@ import {
   GIT_AUTHOR_KEY,
   TFS_BASE_URL_KEY,
   TFS_COLLECTIONS_KEY,
-  TFS_PAT_KEY,
+  THEME_ACCENT_KEY,
+  THEME_MODE_KEY,
   getSetting,
   setSetting,
+  getTfsPat,
+  setTfsPat,
   runAi,
   tfsTestConnection,
   exportAll,
@@ -16,7 +19,7 @@ import {
   readTextFile,
 } from "../lib/api";
 import { todayStr } from "../lib/format";
-import { ACCENTS, type AccentName, type ThemeMode } from "../lib/theme";
+import { ACCENTS, isAccentName, isThemeMode, type AccentName, type ThemeMode } from "../lib/theme";
 
 interface Props {
   onClose: () => void;
@@ -36,7 +39,7 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const [tfsBaseUrl, setTfsBaseUrl] = useState("");
   const [tfsCollections, setTfsCollections] = useState<string[]>([]);
   const [newCollection, setNewCollection] = useState("");
-  const [tfsPat, setTfsPat] = useState("");
+  const [tfsPat, setTfsPatValue] = useState("");
   const [gitSaved, setGitSaved] = useState(false);
   const [tfsTesting, setTfsTesting] = useState(false);
   const [tfsTestResult, setTfsTestResult] = useState("");
@@ -48,7 +51,7 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
     getSetting(GIT_AUTHOR_KEY).then((v) => setGitAuthor(v ?? ""));
     getSetting(TFS_BASE_URL_KEY).then((v) => setTfsBaseUrl(v ?? ""));
     getSetting(TFS_COLLECTIONS_KEY).then((v) => setTfsCollections(v ? JSON.parse(v) : []));
-    getSetting(TFS_PAT_KEY).then((v) => setTfsPat(v ?? ""));
+    getTfsPat().then(setTfsPatValue);
   }, []);
 
   const addCollection = () => {
@@ -62,12 +65,12 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const removeCollection = (c: string) =>
     setTfsCollections(tfsCollections.filter((x) => x !== c));
 
-  // 把目前畫面上的 TFS 設定寫回 DB（測試與儲存共用）
+  // 把目前畫面上的 TFS 設定寫回 DB（測試與儲存共用）；PAT 走 keychain
   const persistTfs = async () => {
     await setSetting(GIT_AUTHOR_KEY, gitAuthor.trim());
     await setSetting(TFS_BASE_URL_KEY, tfsBaseUrl.trim());
     await setSetting(TFS_COLLECTIONS_KEY, JSON.stringify(tfsCollections));
-    await setSetting(TFS_PAT_KEY, tfsPat.trim());
+    await setTfsPat(tfsPat.trim());
   };
 
   const saveGit = async () => {
@@ -79,13 +82,24 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const testTfs = async () => {
     setTfsTesting(true);
     setTfsTestResult("");
+    // 後端從 settings/keychain 讀設定，測試需先暫存目前輸入值；測完還原原值，避免「測試＝偷偷存檔」
+    const orig = await Promise.all(
+      [GIT_AUTHOR_KEY, TFS_BASE_URL_KEY, TFS_COLLECTIONS_KEY].map(
+        async (k) => [k, await getSetting(k)] as const,
+      ),
+    );
+    const origPat = await getTfsPat();
     try {
-      await persistTfs(); // 用目前輸入的設定測試
+      await persistTfs();
       const count = await tfsTestConnection();
       setTfsTestResult(`✅ 連線成功，找到 ${count} 個 repo`);
     } catch (e) {
       setTfsTestResult(`❌ ${e}`);
     } finally {
+      for (const [k, v] of orig) {
+        if (v !== null) await setSetting(k, v);
+      }
+      await setTfsPat(origPat);
       setTfsTesting(false);
     }
   };
@@ -129,7 +143,14 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       getSetting(GIT_AUTHOR_KEY).then((v) => setGitAuthor(v ?? ""));
       getSetting(TFS_BASE_URL_KEY).then((v) => setTfsBaseUrl(v ?? ""));
       getSetting(TFS_COLLECTIONS_KEY).then((v) => setTfsCollections(v ? JSON.parse(v) : []));
-      getSetting(TFS_PAT_KEY).then((v) => setTfsPat(v ?? ""));
+      getTfsPat().then(setTfsPatValue);
+      // 主題設定也可能被覆蓋，重套到畫面
+      getSetting(THEME_ACCENT_KEY).then((v) => {
+        if (isAccentName(v)) onAccentChange(v);
+      });
+      getSetting(THEME_MODE_KEY).then((v) => {
+        if (isThemeMode(v)) onModeChange(v);
+      });
       setBackupMsg(`✅ 已匯入 ${count} 份日報`);
     } catch (e) {
       setBackupMsg(`❌ 匯入失敗：${e}`);
@@ -139,13 +160,16 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const test = async () => {
     setTesting(true);
     setTestResult("");
+    // 後端從 settings 表讀命令，測試需先暫存目前輸入值；測完還原原值，避免「測試＝偷偷存檔」
+    const orig = await getSetting(AI_COMMAND_KEY);
     try {
-      await setSetting(AI_COMMAND_KEY, aiCommand.trim()); // 用目前輸入的命令測試
+      await setSetting(AI_COMMAND_KEY, aiCommand.trim());
       const out = await runAi("請只回覆兩個字：可用");
       setTestResult(`✅ 回應：${out.slice(0, 200)}`);
     } catch (e) {
       setTestResult(`❌ ${e}`);
     } finally {
+      if (orig !== null) await setSetting(AI_COMMAND_KEY, orig);
       setTesting(false);
     }
   };
@@ -263,11 +287,13 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
         <input
           type="password"
           value={tfsPat}
-          onChange={(e) => setTfsPat(e.target.value)}
+          onChange={(e) => setTfsPatValue(e.target.value)}
           placeholder="貼上 PAT"
           className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
         />
-        <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">PAT 只存在本機，不會包含在「匯出全部資料」的備份檔中。</p>
+        <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
+          PAT 存在系統的憑證管理員（keychain；系統不支援時退回本機資料庫），不會包含在「匯出全部資料」的備份檔中。
+        </p>
 
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">作者關鍵字（逗號分隔，留空＝全部）</label>
         <input
