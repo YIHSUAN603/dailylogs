@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import MDEditor from "@uiw/react-md-editor";
 import "@uiw/react-md-editor/markdown-editor.css";
@@ -7,6 +7,7 @@ import { reportToEditableText, dedupeCommits } from "../lib/format";
 import * as exporter from "../lib/export";
 import * as ai from "../lib/ai";
 import * as api from "../lib/api";
+import { toast, toastError } from "../lib/toast";
 
 interface Props {
   report: Report;
@@ -20,8 +21,20 @@ interface Props {
 }
 
 export default function ReportEditor({ report, saving, tags, tasks, dark, onChange, onTagsChange, onDelete }: Props) {
-  const [toast, setToast] = useState("");
   const [aiBusy, setAiBusy] = useState("");
+  // App 以 key={report.date} 掛載本元件：切換日期會卸載重建。
+  // AI 完成時若元件已卸載（使用者已切到別天），丟棄結果避免寫進另一天的日報。
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const applyIfCurrent = (fn: () => void) => {
+    if (!alive.current) throw new Error("已切換到其他日期，結果未套用");
+    fn();
+  };
 
   // 舊資料相容：raw_notes 空但有 categories 時，把結構化內容轉成 Markdown 一次性遷移
   useEffect(() => {
@@ -32,17 +45,12 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report.date]);
 
-  const flash = (msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast(""), 2200);
-  };
-
   const run = (action: () => void | Promise<unknown>, okMsg: string) => async () => {
     try {
       await action();
-      flash(okMsg);
+      toast(okMsg);
     } catch (e) {
-      flash(`失敗：${e}`);
+      toastError(`失敗：${e}`);
     }
   };
 
@@ -50,9 +58,9 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
     setAiBusy(label);
     try {
       await action();
-      flash(`AI 已完成：${label}`);
+      toast(`AI 已完成：${label}`);
     } catch (e) {
-      flash(`AI 失敗：${e}`);
+      toastError(`AI 失敗：${e}`);
     } finally {
       setAiBusy("");
     }
@@ -87,7 +95,7 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
               try {
                 await onDelete(report.date);
               } catch (e) {
-                flash(`刪除失敗：${e}`);
+                toastError(`刪除失敗：${e}`);
               }
             }}
             className="rounded-md border border-rose-300 px-3 py-1 text-sm text-rose-600 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/40"
@@ -104,7 +112,8 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
           accent
           disabled={!!aiBusy}
           onClick={runAi("整理成正式報告", async () => {
-            onChange({ raw_notes: await ai.organizeReport(report, tasks) });
+            const notes = await ai.organizeReport(report, tasks);
+            applyIfCurrent(() => onChange({ raw_notes: notes }));
           })}
         >
           整理成正式報告
@@ -114,7 +123,8 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
           disabled={!!aiBusy}
           onClick={runAi("潤稿", async () => {
             if (!report.raw_notes.trim()) throw new Error("內容是空的，先寫點東西");
-            onChange({ raw_notes: await ai.polishReport(report) });
+            const notes = await ai.polishReport(report);
+            applyIfCurrent(() => onChange({ raw_notes: notes }));
           })}
         >
           潤稿
@@ -122,7 +132,10 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
         <ToolBtn
           accent
           disabled={!!aiBusy}
-          onClick={runAi("產生標籤", async () => onTagsChange(await ai.generateTags(report)))}
+          onClick={runAi("產生標籤", async () => {
+            const newTags = await ai.generateTags(report);
+            applyIfCurrent(() => onTagsChange(newTags));
+          })}
         >
           產生標籤
         </ToolBtn>
@@ -134,12 +147,12 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
             if (!commits) throw new Error("今天沒有符合的 commit");
             const existing = report.raw_notes.trimEnd();
             if (!existing) {
-              onChange({ raw_notes: commits });
+              applyIfCurrent(() => onChange({ raw_notes: commits }));
               return;
             }
             const fresh = dedupeCommits(existing, commits);
             if (!fresh) throw new Error("沒有新的 commit（都已加入）");
-            onChange({ raw_notes: `${existing}\n\n${fresh}` });
+            applyIfCurrent(() => onChange({ raw_notes: `${existing}\n\n${fresh}` }));
           })}
         >
           從 Git 草擬
@@ -153,7 +166,6 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
         <ToolBtn onClick={run(() => exporter.exportPdf(report), "已開啟列印")}>列印 / PDF</ToolBtn>
 
         {aiBusy && <span className="ml-2 text-xs font-medium text-accent-600 dark:text-accent-400">AI 處理中：{aiBusy}…</span>}
-        {toast && <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">{toast}</span>}
       </div>
 
       {/* 標籤列 */}

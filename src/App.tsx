@@ -6,6 +6,8 @@ import WeeklyView from "./views/WeeklyView";
 import WorkView from "./views/WorkView";
 import { emptyReport, type Report, type ReportMeta, type SearchHit, type Task } from "./types";
 import { todayStr } from "./lib/format";
+import { toastError } from "./lib/toast";
+import Toaster from "./components/Toaster";
 import * as api from "./lib/api";
 import {
   DEFAULT_ACCENT,
@@ -28,17 +30,17 @@ export default function App() {
   const [view, setView] = useState<"editor" | "settings" | "weekly" | "work">("editor");
   const [search, setSearch] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
-  const [error, setError] = useState("");
   const [accent, setAccent] = useState<AccentName>(DEFAULT_ACCENT);
   const [mode, setMode] = useState<ThemeMode>(DEFAULT_MODE);
   const [dark, setDark] = useState(false); // 解析後的實際深淺（system 依系統偏好）
   const saveTimer = useRef<number | null>(null);
+  const pendingSave = useRef<Report | null>(null);
 
   const refreshList = useCallback(async () => {
     try {
       setReports(await api.listReports());
     } catch (e) {
-      setError(`載入清單失敗：${e}`);
+      toastError(`載入清單失敗：${e}`);
     }
   }, []);
 
@@ -46,21 +48,56 @@ export default function App() {
     try {
       setTasks(await api.listTasks());
     } catch (e) {
-      setError(`載入工作項目失敗：${e}`);
+      toastError(`載入工作項目失敗：${e}`);
     }
   }, []);
 
-  // 載入某日日報（不存在則開新的空白日報）與其標籤
-  const openDate = useCallback(async (date: string) => {
+  // 把尚未觸發的防抖存檔立即寫入（切換日期/刪除前呼叫，避免遺漏最後幾秒的編輯）
+  const doSave = useCallback(async () => {
+    const next = pendingSave.current;
+    if (!next) return;
+    pendingSave.current = null;
+    setSaving(true);
     try {
-      const existing = await api.getReport(date);
-      setReport(existing ?? emptyReport(date));
-      setTags(await api.getReportTags(date));
-      setView("editor");
+      const updatedAt = await api.saveReport(next);
+      setReport((r) => (r && r.date === next.date ? { ...r, updated_at: updatedAt } : r));
+      // 直接在本地 upsert 側欄清單（依日期新到舊），不必每次存檔都重抓整份
+      setReports((prev) => {
+        const meta: ReportMeta = { date: next.date, status: next.status, updated_at: updatedAt };
+        return [...prev.filter((m) => m.date !== next.date), meta].sort((a, b) =>
+          a.date < b.date ? 1 : -1,
+        );
+      });
     } catch (e) {
-      setError(`開啟日報失敗：${e}`);
+      toastError(`存檔失敗：${e}`);
+    } finally {
+      setSaving(false);
     }
   }, []);
+
+  const flushPendingSave = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    await doSave();
+  }, [doSave]);
+
+  // 載入某日日報（不存在則開新的空白日報）與其標籤
+  const openDate = useCallback(
+    async (date: string) => {
+      await flushPendingSave();
+      try {
+        const existing = await api.getReport(date);
+        setReport(existing ?? emptyReport(date));
+        setTags(await api.getReportTags(date));
+        setView("editor");
+      } catch (e) {
+        toastError(`開啟日報失敗：${e}`);
+      }
+    },
+    [flushPendingSave],
+  );
 
   // 初次載入：列出清單並開啟今天
   useEffect(() => {
@@ -118,7 +155,7 @@ export default function App() {
       try {
         setHits(await api.searchReports(search));
       } catch (e) {
-        setError(`搜尋失敗：${e}`);
+        toastError(`搜尋失敗：${e}`);
       }
     }, 250);
     return () => clearTimeout(t);
@@ -130,23 +167,16 @@ export default function App() {
       setReport((prev) => {
         if (!prev) return prev;
         const next = { ...prev, ...patch };
+        pendingSave.current = next;
         if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = window.setTimeout(async () => {
-          setSaving(true);
-          try {
-            const updatedAt = await api.saveReport(next);
-            setReport((r) => (r && r.date === next.date ? { ...r, updated_at: updatedAt } : r));
-            await refreshList();
-          } catch (e) {
-            setError(`存檔失敗：${e}`);
-          } finally {
-            setSaving(false);
-          }
+        saveTimer.current = window.setTimeout(() => {
+          saveTimer.current = null;
+          void doSave();
         }, 600);
         return next;
       });
     },
-    [refreshList],
+    [doSave],
   );
 
   // 標籤變更：立即存檔
@@ -157,15 +187,20 @@ export default function App() {
       try {
         await api.setReportTags(report.date, newTags);
       } catch (e) {
-        setError(`標籤存檔失敗：${e}`);
+        toastError(`標籤存檔失敗：${e}`);
       }
     },
     [report],
   );
 
-  // 刪除日報：刪除後刷新清單，開啟剩下最新一份（無則退回今天）
+  // 刪除日報：丟棄該日尚未觸發的防抖存檔，刪除後刷新清單，開啟剩下最新一份（無則退回今天）
   const handleDelete = useCallback(
     async (date: string) => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (pendingSave.current?.date === date) pendingSave.current = null;
       await api.deleteReport(date);
       const list = await api.listReports();
       setReports(list);
@@ -177,18 +212,7 @@ export default function App() {
 
   return (
     <div className="relative flex h-screen w-screen overflow-hidden bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100">
-      {error && (
-        <div className="absolute inset-x-0 top-0 z-50 flex items-center justify-between gap-3 bg-rose-600 px-4 py-2 text-sm text-white">
-          <span className="truncate">{error}</span>
-          <button
-            onClick={() => setError("")}
-            className="shrink-0 rounded px-2 py-0.5 hover:bg-rose-700"
-            aria-label="關閉錯誤訊息"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      <Toaster />
       <Sidebar
         reports={reports}
         selectedDate={view === "editor" ? report?.date ?? "" : ""}
@@ -213,9 +237,10 @@ export default function App() {
         ) : view === "weekly" ? (
           <WeeklyView onClose={() => setView("editor")} dark={dark} />
         ) : view === "work" ? (
-          <WorkView tasks={tasks} onChanged={refreshTasks} onClose={() => setView("editor")} />
+          <WorkView tasks={tasks} onChanged={refreshTasks} onClose={() => setView("editor")} dark={dark} />
         ) : report ? (
           <ReportEditor
+            key={report.date}
             report={report}
             saving={saving}
             tags={tags}

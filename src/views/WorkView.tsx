@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
+import MDEditor from "@uiw/react-md-editor";
 import { emptyTask, type Task, type TaskStatus } from "../types";
 import * as api from "../lib/api";
 import * as ai from "../lib/ai";
 import * as exporter from "../lib/export";
+import { toast, toastError } from "../lib/toast";
 import TaskEditCard from "../components/TaskEditCard";
 import TaskBreakdownPanel from "../components/TaskBreakdownPanel";
 import TaskListPanel from "./TaskListPanel";
@@ -12,12 +15,13 @@ interface Props {
   tasks: Task[];
   onChanged: () => Promise<void>;
   onClose: () => void;
+  dark: boolean;
 }
 
 type Mode = "list" | "calendar";
 
 /** 工作面板容器：清單 / 月曆兩種檢視共用任務資料、篩選與工具（AI 拆解 / TFS 匯入 / AI 彙整），切模式時不重置 */
-export default function WorkView({ tasks, onChanged, onClose }: Props) {
+export default function WorkView({ tasks, onChanged, onClose, dark }: Props) {
   const [mode, setMode] = useState<Mode>("calendar");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [projectFilter, setProjectFilter] = useState<string>("all");
@@ -26,6 +30,20 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
   const [summary, setSummary] = useState("");
   const [splitting, setSplitting] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
+  const editDirty = useRef(false); // 編輯卡是否有未儲存變更（由 TaskEditCard 回報）
+
+  // 關閉編輯彈窗；有未儲存變更時先確認，避免點背景 / Esc 誤丟編輯內容
+  const closeEditor = async () => {
+    if (editDirty.current) {
+      const ok = await ask("尚未儲存的變更將會遺失，確定關閉？", {
+        title: "關閉編輯",
+        kind: "warning",
+      });
+      if (!ok) return;
+    }
+    editDirty.current = false;
+    setEditing(null);
+  };
 
   // 載入先前匯入的 TFS 專案名稱
   useEffect(() => {
@@ -39,10 +57,10 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
     })();
   }, []);
 
-  // Esc 關閉編輯彈窗
+  // Esc 關閉編輯彈窗（有未儲存變更時會先確認）
   useEffect(() => {
     if (!editing) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setEditing(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && void closeEditor();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [editing]);
@@ -62,9 +80,9 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
       const list = await api.tfsListProjects();
       await api.setSetting(api.TFS_PROJECTS_KEY, JSON.stringify(list));
       setImportedProjects(list);
-      alert(`已匯入 ${list.length} 個專案`);
+      toast(`已匯入 ${list.length} 個專案`);
     } catch (e) {
-      alert(`匯入失敗：${e}`);
+      toastError(`匯入失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -78,7 +96,7 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
     try {
       setSummary(await ai.summarizeProject(ofProject, projectFilter));
     } catch (e) {
-      alert(`AI 彙整失敗：${e}`);
+      toastError(`AI 彙整失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -93,12 +111,14 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
   const saveTask = async (t: Task) => {
     await api.saveTask(t);
     await onChanged();
+    editDirty.current = false;
     setEditing(null);
   };
 
   const removeTask = async (id: number) => {
     await api.deleteTask(id);
     await onChanged();
+    editDirty.current = false;
     setEditing(null);
   };
 
@@ -200,9 +220,9 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
               </button>
             </div>
           </div>
-          <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm text-slate-700 dark:text-slate-200">
-            {summary}
-          </pre>
+          <div className="max-h-72 overflow-y-auto" data-color-mode={dark ? "dark" : "light"}>
+            <MDEditor.Markdown source={summary} style={{ background: "transparent" }} />
+          </div>
         </div>
       )}
 
@@ -225,7 +245,7 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
       {editing && (
         <div
           className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/40 p-6 backdrop-blur-sm"
-          onClick={() => setEditing(null)}
+          onClick={() => void closeEditor()}
         >
           <div className="mt-10 w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <TaskEditCard
@@ -234,7 +254,8 @@ export default function WorkView({ tasks, onChanged, onClose }: Props) {
               projects={projects}
               onSave={saveTask}
               onDelete={removeTask}
-              onCancel={() => setEditing(null)}
+              onCancel={() => void closeEditor()}
+              onDirtyChange={(d) => (editDirty.current = d)}
             />
           </div>
         </div>

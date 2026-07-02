@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   TASK_STATUSES,
   TASK_PRIORITIES,
@@ -7,6 +7,7 @@ import {
   type TaskPriority,
 } from "../types";
 import * as ai from "../lib/ai";
+import { toastError } from "../lib/toast";
 import DatePicker from "./DatePicker";
 import ProjectInput from "./ProjectInput";
 
@@ -17,24 +18,30 @@ interface Props {
   onSave: (t: Task) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
   onCancel: () => void;
+  /** 回報 draft 是否與初始任務不同（給外層在關閉前確認用） */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /** 工作項目編輯卡：工作面板與日曆共用。自管 draft / busy / 刪除二次確認 / AI 標籤 */
-export default function TaskEditCard({ task, projects, onSave, onDelete, onCancel }: Props) {
+export default function TaskEditCard({ task, projects, onSave, onDelete, onCancel, onDirtyChange }: Props) {
   const [editing, setEditing] = useState<Task>(task);
   const [busy, setBusy] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
 
+  useEffect(() => {
+    onDirtyChange?.(JSON.stringify(editing) !== JSON.stringify(task));
+  }, [editing, task, onDirtyChange]);
+
   const save = async () => {
     if (!editing.title.trim()) {
-      alert("請輸入標題");
+      toastError("請輸入標題");
       return;
     }
     setBusy("儲存中");
     try {
       await onSave({ ...editing, title: editing.title.trim() });
     } catch (e) {
-      alert(`儲存失敗：${e}`);
+      toastError(`儲存失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -46,7 +53,7 @@ export default function TaskEditCard({ task, projects, onSave, onDelete, onCance
     try {
       await onDelete(editing.id);
     } catch (e) {
-      alert(`刪除失敗：${e}`);
+      toastError(`刪除失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -54,7 +61,7 @@ export default function TaskEditCard({ task, projects, onSave, onDelete, onCance
 
   const genTags = async () => {
     if (!editing.title.trim()) {
-      alert("請先輸入標題");
+      toastError("請先輸入標題");
       return;
     }
     setBusy("AI 標籤中");
@@ -64,7 +71,7 @@ export default function TaskEditCard({ task, projects, onSave, onDelete, onCance
       const merged = Array.from(new Set([...editing.tags, ...generated]));
       setEditing({ ...editing, tags: merged });
     } catch (e) {
-      alert(`AI 產製標籤失敗：${e}`);
+      toastError(`AI 產製標籤失敗：${e}`);
     } finally {
       setBusy("");
     }
