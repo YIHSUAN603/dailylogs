@@ -4,6 +4,7 @@ import MDEditor from "@uiw/react-md-editor";
 import "@uiw/react-md-editor/markdown-editor.css";
 import type { Report, Task } from "../types";
 import { reportToEditableText, dedupeCommits } from "../lib/format";
+import { extractCarryover } from "../lib/carryover";
 import * as exporter from "../lib/export";
 import * as ai from "../lib/ai";
 import * as api from "../lib/api";
@@ -51,6 +52,36 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
       toast(okMsg);
     } catch (e) {
       toastError(`失敗：${e}`);
+    }
+  };
+
+  // 帶入前一份日報的「進行中／明日／待辦」段落。不用 run()：使用者在對話框按取消時要靜默返回
+  const carryYesterday = async () => {
+    try {
+      const metas = await api.listReports(); // 依日期新到舊
+      const prev = metas.find((m) => m.date < report.date);
+      if (!prev) throw new Error("找不到更早的日報");
+      const prevReport = await api.getReport(prev.date);
+      if (!prevReport) throw new Error("讀取前一份日報失敗");
+      // 舊資料相容：raw_notes 空但有 categories 時轉成 Markdown 再擷取
+      const source = prevReport.raw_notes.trim() ? prevReport.raw_notes : reportToEditableText(prevReport);
+      let extracted = extractCarryover(source);
+      if (extracted === null) {
+        const ok = await ask(`${prev.date} 的日報找不到「進行中／明日／待辦」段落，要帶入整份內容嗎？`, {
+          title: "帶入昨日",
+          kind: "info",
+        });
+        if (!ok) return;
+        extracted = source.trim();
+      }
+      if (!extracted) throw new Error(`${prev.date} 的日報沒有可帶入的內容`);
+      const existing = report.raw_notes.trimEnd();
+      if (existing.includes(extracted)) throw new Error("內容已帶入過");
+      const block = `## 承上日（${prev.date}）\n\n${extracted}`;
+      applyIfCurrent(() => onChange({ raw_notes: existing ? `${existing}\n\n${block}` : block }));
+      toast(`已帶入 ${prev.date} 的未完事項`);
+    } catch (e) {
+      toastError(`帶入昨日失敗：${e}`);
     }
   };
 
@@ -157,6 +188,7 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
         >
           從 Git 草擬
         </ToolBtn>
+        <ToolBtn onClick={carryYesterday}>帶入昨日</ToolBtn>
 
         <span className="ml-3 text-xs text-slate-400 dark:text-slate-500">輸出：</span>
         <ToolBtn onClick={run(() => exporter.copyPlainText(report), "已複製純文字")}>複製文字</ToolBtn>

@@ -89,7 +89,18 @@ export default function App() {
       await flushPendingSave();
       try {
         const existing = await api.getReport(date);
-        setReport(existing ?? emptyReport(date));
+        if (existing) {
+          setReport(existing);
+        } else {
+          // 新日報預填範本（只改 state 不落地，維持「未編輯不建檔」）；讀範本失敗退回空白
+          let template = "";
+          try {
+            template = (await api.getSetting(api.REPORT_TEMPLATE_KEY)) ?? "";
+          } catch {
+            template = "";
+          }
+          setReport(template.trim() ? { ...emptyReport(date), raw_notes: template } : emptyReport(date));
+        }
         setTags(await api.getReportTags(date));
         setView("editor");
       } catch (e) {

@@ -133,6 +133,8 @@ export function importAll(json: string): Promise<number> {
 
 /** 設定 key */
 export const AI_COMMAND_KEY = "ai_command";
+export const AI_TIMEOUT_KEY = "ai_timeout_secs"; // AI 逾時秒數（正整數字串；須與 commands.rs 的 AI_TIMEOUT_KEY 一致）
+export const REPORT_TEMPLATE_KEY = "report_template"; // 新建日報時預填的 Markdown 範本
 export const TFS_BASE_URL_KEY = "tfs_base_url";
 export const TFS_COLLECTIONS_KEY = "tfs_collections"; // JSON 字串陣列
 export const GIT_AUTHOR_KEY = "git_author"; // 作者比對關鍵字（逗號分隔，包含比對）
