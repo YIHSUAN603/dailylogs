@@ -20,7 +20,7 @@ interface Props {
 
 type Mode = "list" | "calendar";
 
-/** 工作面板容器：清單 / 月曆兩種檢視共用任務資料、篩選與工具（AI 拆解 / TFS 匯入 / AI 彙整），切模式時不重置 */
+/** 工作面板容器：清單 / 月曆兩種檢視共用任務資料、篩選與工具（AI 拆解 / GitHub 匯入 / AI 彙整），切模式時不重置 */
 export default function WorkView({ tasks, onChanged, onClose, dark }: Props) {
   const [mode, setMode] = useState<Mode>("calendar");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
@@ -45,11 +45,11 @@ export default function WorkView({ tasks, onChanged, onClose, dark }: Props) {
     setEditing(null);
   };
 
-  // 載入先前匯入的 TFS 專案名稱
+  // 載入先前匯入的 GitHub repo 名稱
   useEffect(() => {
     (async () => {
       try {
-        const raw = await api.getSetting(api.TFS_PROJECTS_KEY);
+        const raw = await api.getSetting(api.GITHUB_REPOS_KEY);
         if (raw) setImportedProjects(JSON.parse(raw));
       } catch {
         // 略過解析失敗
@@ -65,7 +65,7 @@ export default function WorkView({ tasks, onChanged, onClose, dark }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [editing]);
 
-  // 專案清單（任務既有 ∪ 匯入的 TFS 專案，去重、去空）
+  // 專案清單（任務既有 ∪ 匯入的 GitHub repo，去重、去空）
   const projects = useMemo(
     () =>
       Array.from(
@@ -77,10 +77,10 @@ export default function WorkView({ tasks, onChanged, onClose, dark }: Props) {
   const importProjects = async () => {
     setBusy("匯入專案中");
     try {
-      const list = await api.tfsListProjects();
-      await api.setSetting(api.TFS_PROJECTS_KEY, JSON.stringify(list));
+      const list = await api.githubListRepos();
+      await api.setSetting(api.GITHUB_REPOS_KEY, JSON.stringify(list));
       setImportedProjects(list);
-      toast(`已匯入 ${list.length} 個專案`);
+      toast(`已匯入 ${list.length} 個儲存庫`);
     } catch (e) {
       toastError(`匯入失敗：${e}`);
     } finally {
@@ -185,7 +185,7 @@ export default function WorkView({ tasks, onChanged, onClose, dark }: Props) {
           disabled={!!busy}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
         >
-          {busy === "匯入專案中" ? "匯入中…" : "匯入 TFS 專案"}
+          {busy === "匯入專案中" ? "匯入中…" : "匯入 GitHub 儲存庫"}
         </button>
         {projectFilter !== "all" && (
           <button

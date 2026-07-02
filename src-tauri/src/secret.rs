@@ -1,12 +1,12 @@
-//! TFS PAT 的安全儲存：優先存 OS keychain（Windows 憑證管理員 / Linux Secret Service），
+//! GitHub token 的安全儲存：優先存 OS keychain（macOS 鑰匙圈 / Windows 憑證管理員 / Linux Secret Service），
 //! keychain 不可用時（例如 WSL 沒有 Secret Service）退回 settings 表，行為與舊版相同。
 use crate::db;
 use keyring::Entry;
 use rusqlite::Connection;
 
 const SERVICE: &str = "com.richitech.dailylogs";
-const USER: &str = "tfs_pat";
-const LEGACY_KEY: &str = "tfs_pat";
+const USER: &str = "github_token";
+const LEGACY_KEY: &str = "github_token";
 
 fn entry() -> keyring::Result<Entry> {
     Entry::new(SERVICE, USER)
@@ -16,9 +16,9 @@ fn delete_legacy(conn: &Connection) {
     let _ = conn.execute("DELETE FROM settings WHERE key = ?1", [LEGACY_KEY]);
 }
 
-/// 讀取 PAT：keychain 優先；沒有時讀 settings 表（舊資料），
+/// 讀取 token：keychain 優先；沒有時讀 settings 表（舊資料），
 /// 並趁機把舊資料搬進 keychain（搬移成功才刪除 settings 內的明文）。
-pub fn get_pat(conn: &Connection) -> Result<String, String> {
+pub fn get_token(conn: &Connection) -> Result<String, String> {
     if let Ok(e) = entry() {
         match e.get_password() {
             Ok(p) => return Ok(p),
@@ -39,8 +39,8 @@ pub fn get_pat(conn: &Connection) -> Result<String, String> {
     Ok(legacy)
 }
 
-/// 寫入 PAT：keychain 成功即清掉 settings 表的明文；keychain 不可用則存 settings 表。
-pub fn set_pat(conn: &Connection, value: &str) -> Result<(), String> {
+/// 寫入 token：keychain 成功即清掉 settings 表的明文；keychain 不可用則存 settings 表。
+pub fn set_token(conn: &Connection, value: &str) -> Result<(), String> {
     let v = value.trim();
     if let Ok(e) = entry() {
         if v.is_empty() {
