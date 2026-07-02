@@ -5,17 +5,17 @@ import {
   AI_COMMAND_KEY,
   AI_TIMEOUT_KEY,
   REPORT_TEMPLATE_KEY,
-  GIT_AUTHOR_KEY,
-  TFS_BASE_URL_KEY,
-  TFS_COLLECTIONS_KEY,
+  GITHUB_AUTHOR_KEY,
+  GITHUB_API_URL_KEY,
+  GITHUB_OWNERS_KEY,
   THEME_ACCENT_KEY,
   THEME_MODE_KEY,
   getSetting,
   setSetting,
-  getTfsPat,
-  setTfsPat,
+  getGithubToken,
+  setGithubToken,
   runAi,
-  tfsTestConnection,
+  githubTestConnection,
   exportAll,
   importAll,
   readTextFile,
@@ -42,14 +42,14 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const [reportTemplate, setReportTemplate] = useState("");
   const [templateSaved, setTemplateSaved] = useState(false);
 
-  const [gitAuthor, setGitAuthor] = useState("");
-  const [tfsBaseUrl, setTfsBaseUrl] = useState("");
-  const [tfsCollections, setTfsCollections] = useState<string[]>([]);
-  const [newCollection, setNewCollection] = useState("");
-  const [tfsPat, setTfsPatValue] = useState("");
-  const [gitSaved, setGitSaved] = useState(false);
-  const [tfsTesting, setTfsTesting] = useState(false);
-  const [tfsTestResult, setTfsTestResult] = useState("");
+  const [githubAuthor, setGithubAuthor] = useState("");
+  const [githubApiUrl, setGithubApiUrl] = useState("");
+  const [githubOwners, setGithubOwners] = useState<string[]>([]);
+  const [newOwner, setNewOwner] = useState("");
+  const [githubToken, setGithubTokenValue] = useState("");
+  const [githubSaved, setGithubSaved] = useState(false);
+  const [githubTesting, setGithubTesting] = useState(false);
+  const [githubTestResult, setGithubTestResult] = useState("");
 
   const [backupMsg, setBackupMsg] = useState("");
 
@@ -57,59 +57,60 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
     getSetting(AI_COMMAND_KEY).then((v) => setAiCommand(v ?? "claude -p"));
     getSetting(AI_TIMEOUT_KEY).then((v) => setAiTimeout(v ?? "120"));
     getSetting(REPORT_TEMPLATE_KEY).then((v) => setReportTemplate(v ?? ""));
-    getSetting(GIT_AUTHOR_KEY).then((v) => setGitAuthor(v ?? ""));
-    getSetting(TFS_BASE_URL_KEY).then((v) => setTfsBaseUrl(v ?? ""));
-    getSetting(TFS_COLLECTIONS_KEY).then((v) => setTfsCollections(v ? JSON.parse(v) : []));
-    getTfsPat().then(setTfsPatValue);
+    getSetting(GITHUB_AUTHOR_KEY).then((v) => setGithubAuthor(v ?? ""));
+    getSetting(GITHUB_API_URL_KEY).then((v) => setGithubApiUrl(v ?? ""));
+    getSetting(GITHUB_OWNERS_KEY).then((v) => setGithubOwners(v ? JSON.parse(v) : []));
+    getGithubToken().then(setGithubTokenValue);
   }, []);
 
-  const addCollection = () => {
-    const c = newCollection.trim();
-    if (c && !tfsCollections.includes(c)) {
-      setTfsCollections([...tfsCollections, c]);
+  const addOwner = () => {
+    const o = newOwner.trim();
+    if (o && !githubOwners.includes(o)) {
+      setGithubOwners([...githubOwners, o]);
     }
-    setNewCollection("");
+    setNewOwner("");
   };
 
-  const removeCollection = (c: string) =>
-    setTfsCollections(tfsCollections.filter((x) => x !== c));
+  const removeOwner = (o: string) => setGithubOwners(githubOwners.filter((x) => x !== o));
 
-  // 把目前畫面上的 TFS 設定寫回 DB（測試與儲存共用）；PAT 走 keychain
-  const persistTfs = async () => {
-    await setSetting(GIT_AUTHOR_KEY, gitAuthor.trim());
-    await setSetting(TFS_BASE_URL_KEY, tfsBaseUrl.trim());
-    await setSetting(TFS_COLLECTIONS_KEY, JSON.stringify(tfsCollections));
-    await setTfsPat(tfsPat.trim());
+  // 把目前畫面上的 GitHub 設定寫回 DB（測試與儲存共用）；token 走 keychain
+  const persistGithub = async () => {
+    await setSetting(GITHUB_AUTHOR_KEY, githubAuthor.trim());
+    await setSetting(GITHUB_API_URL_KEY, githubApiUrl.trim());
+    await setSetting(GITHUB_OWNERS_KEY, JSON.stringify(githubOwners));
+    await setGithubToken(githubToken.trim());
   };
 
-  const saveGit = async () => {
-    await persistTfs();
-    setGitSaved(true);
-    window.setTimeout(() => setGitSaved(false), 1500);
+  const saveGithub = async () => {
+    await persistGithub();
+    setGithubSaved(true);
+    window.setTimeout(() => setGithubSaved(false), 1500);
   };
 
-  const testTfs = async () => {
-    setTfsTesting(true);
-    setTfsTestResult("");
+  const testGithub = async () => {
+    setGithubTesting(true);
+    setGithubTestResult("");
     // 後端從 settings/keychain 讀設定，測試需先暫存目前輸入值；測完還原原值，避免「測試＝偷偷存檔」
     const orig = await Promise.all(
-      [GIT_AUTHOR_KEY, TFS_BASE_URL_KEY, TFS_COLLECTIONS_KEY].map(
+      [GITHUB_AUTHOR_KEY, GITHUB_API_URL_KEY, GITHUB_OWNERS_KEY].map(
         async (k) => [k, await getSetting(k)] as const,
       ),
     );
-    const origPat = await getTfsPat();
+    const origToken = await getGithubToken();
     try {
-      await persistTfs();
-      const count = await tfsTestConnection();
-      setTfsTestResult(`✅ 連線成功，找到 ${count} 個 repo`);
+      await persistGithub();
+      const count = await githubTestConnection();
+      setGithubTestResult(`✅ 連線成功，找到 ${count} 個 repo`);
     } catch (e) {
-      setTfsTestResult(`❌ ${e}`);
+      setGithubTestResult(`❌ ${e}`);
     } finally {
       for (const [k, v] of orig) {
         if (v !== null) await setSetting(k, v);
       }
-      await setTfsPat(origPat);
-      setTfsTesting(false);
+      // 只在原本就有 token 時還原；否則保留剛輸入的值，
+      // 避免第一次設定（原本為空）時把剛填的 token 洗掉
+      if (origToken) await setGithubToken(origToken);
+      setGithubTesting(false);
     }
   };
 
@@ -174,10 +175,10 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       getSetting(AI_COMMAND_KEY).then((v) => setAiCommand(v ?? "claude -p"));
       getSetting(AI_TIMEOUT_KEY).then((v) => setAiTimeout(v ?? "120"));
       getSetting(REPORT_TEMPLATE_KEY).then((v) => setReportTemplate(v ?? ""));
-      getSetting(GIT_AUTHOR_KEY).then((v) => setGitAuthor(v ?? ""));
-      getSetting(TFS_BASE_URL_KEY).then((v) => setTfsBaseUrl(v ?? ""));
-      getSetting(TFS_COLLECTIONS_KEY).then((v) => setTfsCollections(v ? JSON.parse(v) : []));
-      getTfsPat().then(setTfsPatValue);
+      getSetting(GITHUB_AUTHOR_KEY).then((v) => setGithubAuthor(v ?? ""));
+      getSetting(GITHUB_API_URL_KEY).then((v) => setGithubApiUrl(v ?? ""));
+      getSetting(GITHUB_OWNERS_KEY).then((v) => setGithubOwners(v ? JSON.parse(v) : []));
+      getGithubToken().then(setGithubTokenValue);
       // 主題設定也可能被覆蓋，重套到畫面
       getSetting(THEME_ACCENT_KEY).then((v) => {
         if (isAccentName(v)) onAccentChange(v);
@@ -349,81 +350,84 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 p-5 dark:border-slate-700">
-        <h3 className="mb-1 font-semibold text-slate-800 dark:text-slate-100">TFS 整合</h3>
+        <h3 className="mb-1 font-semibold text-slate-800 dark:text-slate-100">GitHub 整合</h3>
         <p className="mb-3 text-sm text-slate-500 dark:text-slate-400 dark:text-slate-500">
-          設定後，可在日報用「從 Git 草擬」一鍵把當天 TFS 上的 commit 轉成日報草稿。
+          設定後，可在日報用「從 Git 草擬」一鍵把當天 GitHub 上的 commit 轉成日報草稿。
         </p>
 
-        <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">TFS 位址（含 /tfs）</label>
+        <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">GitHub API 位址</label>
         <input
-          value={tfsBaseUrl}
-          onChange={(e) => setTfsBaseUrl(e.target.value)}
-          placeholder="http://192.168.0.143:8080/tfs"
-          className="mb-4 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-        />
-
-        <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
-          Personal Access Token（需 Code(read) 權限）
-        </label>
-        <input
-          type="password"
-          value={tfsPat}
-          onChange={(e) => setTfsPatValue(e.target.value)}
-          placeholder="貼上 PAT"
+          value={githubApiUrl}
+          onChange={(e) => setGithubApiUrl(e.target.value)}
+          placeholder="https://api.github.com"
           className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
         />
         <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-          PAT 存在系統的憑證管理員（keychain；系統不支援時退回本機資料庫），不會包含在「匯出全部資料」的備份檔中。
+          留空＝雲端 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">https://api.github.com</code>；企業版填 API 位址，例如 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">https://ghe.company.com/api/v3</code>。
+        </p>
+
+        <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
+          Personal Access Token（需 repo 讀取權限）
+        </label>
+        <input
+          type="password"
+          value={githubToken}
+          onChange={(e) => setGithubTokenValue(e.target.value)}
+          placeholder="貼上 token"
+          className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
+        />
+        <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
+          token 存在系統的憑證管理員（keychain；系統不支援時退回本機資料庫），不會包含在「匯出全部資料」的備份檔中。
         </p>
 
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">作者關鍵字（逗號分隔，留空＝全部）</label>
         <input
-          value={gitAuthor}
-          onChange={(e) => setGitAuthor(e.target.value)}
-          placeholder="例如 ARIESCHAO（不分大小寫，包含比對）"
+          value={githubAuthor}
+          onChange={(e) => setGithubAuthor(e.target.value)}
+          placeholder="例如 arieschao（不分大小寫，包含比對）"
           className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
         />
         <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-          以「包含、不分大小寫」比對 commit 作者；例如填 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">ARIESCHAO</code> 可命中 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">ARIESCHAO-NB\USER</code>。多台電腦的作者名可用逗號分隔多筆。
+          以「包含、不分大小寫」比對 commit 的 GitHub 帳號（login）、作者姓名與 email，任一命中即算。多個關鍵字可用逗號分隔。
         </p>
 
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Collections</label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Owner（org 或使用者）</label>
         </div>
         <div className="mb-2 flex gap-2">
           <input
-            value={newCollection}
-            onChange={(e) => setNewCollection(e.target.value)}
+            value={newOwner}
+            onChange={(e) => setNewOwner(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                addCollection();
+                addOwner();
               }
             }}
-            placeholder="輸入 collection 名稱，例如 MCollection"
+            placeholder="輸入 org 或使用者名稱，例如 my-org"
             className="flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
           />
           <button
-            onClick={addCollection}
+            onClick={addOwner}
             className="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             + 新增
           </button>
         </div>
-        {tfsCollections.length === 0 ? (
-          <p className="mb-3 text-sm text-slate-400 dark:text-slate-500">尚未新增任何 collection</p>
+        {githubOwners.length === 0 ? (
+          <p className="mb-3 text-sm text-slate-400 dark:text-slate-500">尚未新增任何 owner</p>
         ) : (
           <ul className="mb-3 space-y-1">
-            {tfsCollections.map((c) => (
+            {githubOwners.map((o) => (
               <li
-                key={c}
+                key={o}
                 className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800"
               >
-                <span className="truncate font-mono text-slate-700 dark:text-slate-200" title={c}>
-                  {c}
+                <span className="truncate font-mono text-slate-700 dark:text-slate-200" title={o}>
+                  {o}
                 </span>
                 <button
-                  onClick={() => removeCollection(c)}
+                  onClick={() => removeOwner(o)}
                   className="ml-2 shrink-0 text-xs text-rose-500 hover:underline dark:text-rose-400"
                 >
                   移除
@@ -435,23 +439,23 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
 
         <div className="flex items-center gap-2">
           <button
-            onClick={saveGit}
+            onClick={saveGithub}
             className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
           >
             儲存
           </button>
           <button
-            onClick={testTfs}
-            disabled={tfsTesting}
+            onClick={testGithub}
+            disabled={githubTesting}
             className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            {tfsTesting ? "測試中…" : "測試連線"}
+            {githubTesting ? "測試中…" : "測試連線"}
           </button>
-          {gitSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">已儲存</span>}
+          {githubSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">已儲存</span>}
         </div>
-        {tfsTestResult && (
+        {githubTestResult && (
           <pre className="mt-3 whitespace-pre-wrap rounded-md bg-slate-50 p-3 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200">
-            {tfsTestResult}
+            {githubTestResult}
           </pre>
         )}
       </section>

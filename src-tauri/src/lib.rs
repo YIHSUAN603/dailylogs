@@ -1,8 +1,8 @@
 mod ai;
 mod commands;
 mod db;
+mod github;
 mod secret;
-mod tfs;
 
 use commands::DbState;
 use std::sync::Mutex;
@@ -43,14 +43,14 @@ pub fn run() {
             commands::import_all,
             commands::get_setting,
             commands::set_setting,
-            commands::get_tfs_pat,
-            commands::set_tfs_pat,
+            commands::get_github_token,
+            commands::set_github_token,
             commands::get_report_tags,
             commands::set_report_tags,
             commands::run_ai,
-            commands::git_collect_commits,
-            commands::tfs_test_connection,
-            commands::tfs_list_projects,
+            commands::github_collect_commits,
+            commands::github_test_connection,
+            commands::github_list_repos,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

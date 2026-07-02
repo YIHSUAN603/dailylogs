@@ -174,7 +174,7 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
           accent
           disabled={!!aiBusy}
           onClick={runAi("從 Git 草擬", async () => {
-            const commits = await api.gitCollectCommits(report.date);
+            const commits = await api.githubCollectCommits(report.date);
             if (!commits) throw new Error("今天沒有符合的 commit");
             const existing = report.raw_notes.trimEnd();
             if (!existing) {

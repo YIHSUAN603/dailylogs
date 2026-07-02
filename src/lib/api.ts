@@ -76,14 +76,14 @@ export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
 }
 
-/** 讀取 TFS PAT（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
-export function getTfsPat(): Promise<string> {
-  return invoke("get_tfs_pat");
+/** 讀取 GitHub token（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
+export function getGithubToken(): Promise<string> {
+  return invoke("get_github_token");
 }
 
-/** 寫入 TFS PAT（OS keychain 優先，退回 settings 表） */
-export function setTfsPat(value: string): Promise<void> {
-  return invoke("set_tfs_pat", { value });
+/** 寫入 GitHub token（OS keychain 優先，退回 settings 表） */
+export function setGithubToken(value: string): Promise<void> {
+  return invoke("set_github_token", { value });
 }
 
 /** 取得某日標籤 */
@@ -101,19 +101,19 @@ export function runAi(prompt: string): Promise<string> {
   return invoke("run_ai", { prompt });
 }
 
-/** 從 TFS 取得某日該作者的 commit（組好的文字） */
-export function gitCollectCommits(date: string): Promise<string> {
-  return invoke("git_collect_commits", { date });
+/** 從 GitHub 取得某日該作者的 commit（組好的文字） */
+export function githubCollectCommits(date: string): Promise<string> {
+  return invoke("github_collect_commits", { date });
 }
 
-/** 測試 TFS 連線，回傳所有 collection 的 repo 總數 */
-export function tfsTestConnection(): Promise<number> {
-  return invoke("tfs_test_connection");
+/** 測試 GitHub 連線，回傳所有 owner 的 repo 總數 */
+export function githubTestConnection(): Promise<number> {
+  return invoke("github_test_connection");
 }
 
-/** 列出所有 collection 的團隊專案名稱（給工作面板匯入專案用） */
-export function tfsListProjects(): Promise<string[]> {
-  return invoke("tfs_list_projects");
+/** 列出所有 owner 的 repo 名稱（給工作面板匯入專案用） */
+export function githubListRepos(): Promise<string[]> {
+  return invoke("github_list_repos");
 }
 
 /** 讀取文字檔（路徑由前端的開檔對話框取得，給匯入用） */
@@ -135,9 +135,9 @@ export function importAll(json: string): Promise<number> {
 export const AI_COMMAND_KEY = "ai_command";
 export const AI_TIMEOUT_KEY = "ai_timeout_secs"; // AI 逾時秒數（正整數字串；須與 commands.rs 的 AI_TIMEOUT_KEY 一致）
 export const REPORT_TEMPLATE_KEY = "report_template"; // 新建日報時預填的 Markdown 範本
-export const TFS_BASE_URL_KEY = "tfs_base_url";
-export const TFS_COLLECTIONS_KEY = "tfs_collections"; // JSON 字串陣列
-export const GIT_AUTHOR_KEY = "git_author"; // 作者比對關鍵字（逗號分隔，包含比對）
-export const TFS_PROJECTS_KEY = "tfs_projects"; // 匯入的 TFS 專案名稱（JSON 陣列）
+export const GITHUB_API_URL_KEY = "github_api_url"; // GitHub REST API 位址（空＝預設 api.github.com）
+export const GITHUB_OWNERS_KEY = "github_owners"; // owner（org 或使用者）JSON 字串陣列
+export const GITHUB_AUTHOR_KEY = "github_author"; // 作者比對關鍵字（逗號分隔，包含比對 login/name/email）
+export const GITHUB_REPOS_KEY = "github_repos"; // 匯入的 GitHub repo 名稱（JSON 陣列）
 export const THEME_ACCENT_KEY = "theme_accent"; // 主色名稱（AccentName）
 export const THEME_MODE_KEY = "theme_mode"; // 淺/深色模式（light | dark | system）

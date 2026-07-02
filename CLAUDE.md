@@ -17,7 +17,7 @@ npm run dev            # 僅 vite（瀏覽器無 Tauri API，invoke 會失敗，
 ```
 
 - Rust toolchain 在 `~/.cargo/bin`；非登入 shell 需 `export PATH="$HOME/.cargo/bin:$PATH"`。
-- 測試：前端 vitest（`npm run test:run`，測試檔在 `src/lib/*.test.ts`）；後端 `cargo test`（`db.rs`/`tfs.rs` 內的 `#[cfg(test)]`，用 in-memory SQLite）。驗證編譯：前端 `npm run build`（含 `tsc`）、後端 `cargo check`（在 `src-tauri/`）。CI 另跑 `npm run lint`、`cargo fmt --check`、`cargo clippy -D warnings`。
+- 測試：前端 vitest（`npm run test:run`，測試檔在 `src/lib/*.test.ts`）；後端 `cargo test`（`db.rs`/`github.rs` 內的 `#[cfg(test)]`，用 in-memory SQLite）。驗證編譯：前端 `npm run build`（含 `tsc`）、後端 `cargo check`（在 `src-tauri/`）。CI 另跑 `npm run lint`、`cargo fmt --check`、`cargo clippy -D warnings`。
 
 ### 在 WSLg 啟動（本機環境）
 
@@ -52,13 +52,13 @@ prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→�
 
 （舊版的 `parseCategories()` 解析、`draftFromCommits` 已移除；現在 FORMAT_RULE 只是排版建議，沒有「解析回 Category」的綁定契約。）
 
-### TFS 整合
+### GitHub 整合
 
-`src-tauri/src/tfs.rs`：走地端 Azure DevOps（TFS）REST API（api-version 固定 3.0、PAT Basic Auth）。`collect_commits` 掃所有 collection 的 repo、取指定日期（本機時區，查詢窗放寬 ±1 天避開時區邊界）該作者的 commit 標題，單一 collection/repo 失敗會跳過不中斷，併發上限 10。作者比對是「逗號分隔關鍵字、不分大小寫包含」。設定存 settings 表：`tfs_base_url`、`tfs_collections`（JSON 陣列）、`git_author`；PAT 見下方設定儲存。
+`src-tauri/src/github.rs`：走 GitHub REST API（Bearer token + `User-Agent`/`Accept`/`X-GitHub-Api-Version: 2022-11-28` header），位址可設定（預設 `https://api.github.com`，填企業版 `.../api/v3` 即支援 GHES）。以「owner（org 或使用者）」為單位列 repo：先試 `GET /orgs/{owner}/repos`、404 退 `GET /users/{owner}/repos`，皆含分頁（`per_page=100` 迴圈 page）。`collect_commits` 掃所有 owner 的 repo（`GET /repos/{owner}/{repo}/commits?since&until`），取指定日期（本機時區，查詢窗放寬 ±1 天避開時區邊界）該作者的 commit 訊息首行，單一 owner/repo 失敗會跳過不中斷，併發上限 10。作者比對是「逗號分隔關鍵字、不分大小寫包含」，比對 commit 的 `author.name`／`author.email`／GitHub `login` 三者任一。設定存 settings 表：`github_api_url`、`github_owners`（JSON 陣列）、`github_author`；token 見下方設定儲存。跨 owner 同名 repo 顯示成 `owner/repo`；輸出文字格式為 `# owner / [repo] / - 標題`（`format_commits`）。
 
 ### 設定儲存
 
-一般設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。**例外：TFS PAT** 走 `src-tauri/src/secret.rs`（`get_tfs_pat`/`set_tfs_pat` command）——優先存 OS keychain（Windows 憑證管理員 / Linux Secret Service），keychain 不可用（如 WSL）則退回 settings 表，讀取時會自動把舊明文搬進 keychain；匯出備份一律排除 PAT。
+一般設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。**例外：GitHub token** 走 `src-tauri/src/secret.rs`（`get_github_token`/`set_github_token` command）——優先存 OS keychain（Windows 憑證管理員 / Linux Secret Service），keychain 不可用（如 WSL）則退回 settings 表，讀取時會自動把舊明文搬進 keychain；匯出備份一律排除 token。
 
 ### 前端結構與狀態
 
