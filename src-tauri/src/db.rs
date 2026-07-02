@@ -93,6 +93,12 @@ pub struct SearchHit {
 /// 開啟（或建立）資料庫並初始化結構
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
+    init_schema(&conn)?;
+    Ok(conn)
+}
+
+/// 建表與遷移（open 與測試用的記憶體資料庫共用）
+fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS reports (
             date       TEXT PRIMARY KEY,
@@ -149,7 +155,7 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
         "ALTER TABLE reports ADD COLUMN categories TEXT NOT NULL DEFAULT '[]'",
         [],
     );
-    Ok(conn)
+    Ok(())
 }
 
 /// 側欄：所有日報，依日期新到舊
@@ -192,7 +198,7 @@ pub fn search_reports(conn: &Connection, keyword: &str) -> rusqlite::Result<Vec<
         conn.prepare("SELECT date, status, categories, raw_notes FROM reports ORDER BY date DESC")?;
     let rows = stmt.query_map([], |r| {
         let categories_json: String = r.get(2)?;
-        let categories: Vec<Category> = serde_json::from_str(&categories_json).unwrap_or_default();
+        let categories: Vec<Category> = json_or_default(&categories_json, "reports.categories");
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
@@ -285,7 +291,7 @@ pub fn list_reports_in_range(
     )?;
     let rows = stmt.query_map([start, end], |r| {
         let categories_json: String = r.get(2)?;
-        let categories = serde_json::from_str(&categories_json).unwrap_or_default();
+        let categories: Vec<Category> = json_or_default(&categories_json, "reports.categories");
         Ok(Report {
             date: r.get(0)?,
             status: r.get(1)?,
@@ -305,7 +311,7 @@ pub fn get_report(conn: &Connection, date: &str) -> rusqlite::Result<Option<Repo
         [date],
         |r| {
             let categories_json: String = r.get(2)?;
-            let categories = serde_json::from_str(&categories_json).unwrap_or_default();
+            let categories: Vec<Category> = json_or_default(&categories_json, "reports.categories");
             Ok(Report {
                 date: r.get(0)?,
                 status: r.get(1)?,
@@ -348,7 +354,7 @@ pub fn delete_report(conn: &Connection, date: &str) -> rusqlite::Result<()> {
 /// 從一列查詢結果組出 Task（欄位順序需與下方 SELECT 一致）
 fn row_to_task(r: &rusqlite::Row) -> rusqlite::Result<Task> {
     let tags_json: String = r.get(7)?;
-    let tags = serde_json::from_str(&tags_json).unwrap_or_default();
+    let tags: Vec<String> = json_or_default(&tags_json, "tasks.tags");
     Ok(Task {
         id: r.get(0)?,
         title: r.get(1)?,
@@ -449,6 +455,14 @@ pub fn save_task(conn: &Connection, task: &Task) -> rusqlite::Result<Task> {
 pub fn delete_task(conn: &Connection, id: i64) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
     Ok(())
+}
+
+/// 解析 JSON 欄位；資料損毀時記錄警告並回傳預設值，避免整筆查詢失敗或內容無聲消失
+fn json_or_default<T: serde::de::DeserializeOwned + Default>(raw: &str, ctx: &str) -> T {
+    serde_json::from_str(raw).unwrap_or_else(|e| {
+        eprintln!("[dailylogs] {ctx} 的 JSON 欄位解析失敗，以預設值代替：{e}");
+        T::default()
+    })
 }
 
 /// 讀取設定值，不存在回傳 None
@@ -623,7 +637,7 @@ fn all_reports(conn: &Connection) -> rusqlite::Result<Vec<Report>> {
     )?;
     let rows = stmt.query_map([], |r| {
         let categories_json: String = r.get(2)?;
-        let categories = serde_json::from_str(&categories_json).unwrap_or_default();
+        let categories: Vec<Category> = json_or_default(&categories_json, "reports.categories");
         Ok(Report {
             date: r.get(0)?,
             status: r.get(1)?,
@@ -672,17 +686,177 @@ pub fn export_data(conn: &Connection) -> rusqlite::Result<ExportBundle> {
 
 /// 匯入 bundle（以日期為鍵 upsert 合併），回傳匯入的日報份數
 pub fn import_data(conn: &Connection, bundle: &ExportBundle) -> rusqlite::Result<usize> {
+    // 整批包在一個交易：中途失敗全部回滾，不留半匯入狀態；也避免逐筆 autocommit 的效能損耗
+    let tx = conn.unchecked_transaction()?;
     for report in &bundle.reports {
-        save_report(conn, report)?;
+        save_report(&tx, report)?;
     }
     for (date, tags) in &bundle.tags {
-        set_report_tags(conn, date, tags)?;
+        set_report_tags(&tx, date, tags)?;
     }
     for (key, value) in &bundle.settings {
-        set_setting(conn, key, value)?;
+        set_setting(&tx, key, value)?;
     }
     for summary in &bundle.summaries {
-        save_summary(conn, summary)?;
+        save_summary(&tx, summary)?;
     }
+    tx.commit()?;
     Ok(bundle.reports.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn
+    }
+
+    fn report(date: &str, notes: &str) -> Report {
+        Report {
+            date: date.into(),
+            status: "draft".into(),
+            categories: Vec::new(),
+            raw_notes: notes.into(),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn report_crud_roundtrip() {
+        let conn = mem_db();
+        let updated = save_report(&conn, &report("2026-07-01", "寫了測試")).unwrap();
+        assert!(!updated.is_empty());
+        let got = get_report(&conn, "2026-07-01").unwrap().unwrap();
+        assert_eq!(got.raw_notes, "寫了測試");
+
+        // 同日期 upsert 覆蓋
+        save_report(&conn, &report("2026-07-01", "改了內容")).unwrap();
+        let got = get_report(&conn, "2026-07-01").unwrap().unwrap();
+        assert_eq!(got.raw_notes, "改了內容");
+        assert_eq!(list_reports(&conn).unwrap().len(), 1);
+
+        delete_report(&conn, "2026-07-01").unwrap();
+        assert!(get_report(&conn, "2026-07-01").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_reports_in_range_inclusive() {
+        let conn = mem_db();
+        for d in ["2026-06-30", "2026-07-01", "2026-07-02"] {
+            save_report(&conn, &report(d, "x")).unwrap();
+        }
+        let rs = list_reports_in_range(&conn, "2026-07-01", "2026-07-02").unwrap();
+        let dates: Vec<&str> = rs.iter().map(|r| r.date.as_str()).collect();
+        assert_eq!(dates, ["2026-07-01", "2026-07-02"]);
+    }
+
+    #[test]
+    fn report_tags_overwrite() {
+        let conn = mem_db();
+        save_report(&conn, &report("2026-07-01", "x")).unwrap();
+        set_report_tags(&conn, "2026-07-01", &["前端".into(), "測試".into()]).unwrap();
+        assert_eq!(get_report_tags(&conn, "2026-07-01").unwrap().len(), 2);
+
+        // 整批覆蓋
+        set_report_tags(&conn, "2026-07-01", &["後端".into()]).unwrap();
+        assert_eq!(
+            get_report_tags(&conn, "2026-07-01").unwrap(),
+            vec!["後端".to_string()]
+        );
+    }
+
+    #[test]
+    fn task_completed_at_follows_status() {
+        let conn = mem_db();
+        let t = Task {
+            id: None,
+            title: "工項".into(),
+            status: "todo".into(),
+            project: String::new(),
+            priority: "normal".into(),
+            due_date: None,
+            notes: String::new(),
+            tags: vec!["a".into()],
+            completed_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let saved = save_task(&conn, &t).unwrap();
+        assert!(saved.id.is_some());
+        assert!(saved.completed_at.is_none());
+        assert_eq!(saved.tags, vec!["a".to_string()]);
+
+        // 切到 done 自動補 completed_at；切離 done 清空
+        let done = save_task(
+            &conn,
+            &Task {
+                status: "done".into(),
+                ..saved
+            },
+        )
+        .unwrap();
+        assert!(done.completed_at.is_some());
+        let back = save_task(
+            &conn,
+            &Task {
+                status: "doing".into(),
+                ..done
+            },
+        )
+        .unwrap();
+        assert!(back.completed_at.is_none());
+
+        delete_task(&conn, back.id.unwrap()).unwrap();
+        assert!(list_tasks(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn settings_upsert() {
+        let conn = mem_db();
+        assert!(get_setting(&conn, "k").unwrap().is_none());
+        set_setting(&conn, "k", "v1").unwrap();
+        set_setting(&conn, "k", "v2").unwrap();
+        assert_eq!(get_setting(&conn, "k").unwrap().as_deref(), Some("v2"));
+    }
+
+    #[test]
+    fn search_hits_notes_and_tags() {
+        let conn = mem_db();
+        save_report(&conn, &report("2026-07-01", "修正登入頁的錯誤")).unwrap();
+        save_report(&conn, &report("2026-07-02", "其他事項")).unwrap();
+        set_report_tags(&conn, "2026-07-02", &["登入".into()]).unwrap();
+        let hits = search_reports(&conn, "登入").unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(search_reports(&conn, "不存在的字").unwrap().is_empty());
+    }
+
+    #[test]
+    fn export_import_roundtrip_excludes_pat() {
+        let src = mem_db();
+        save_report(&src, &report("2026-07-01", "內容")).unwrap();
+        set_report_tags(&src, "2026-07-01", &["tag1".into()]).unwrap();
+        set_setting(&src, "ai_command", "claude -p").unwrap();
+        set_setting(&src, "tfs_pat", "secret").unwrap();
+
+        let bundle = export_data(&src).unwrap();
+        assert!(!bundle.settings.contains_key("tfs_pat")); // PAT 不得隨備份外洩
+
+        let dst = mem_db();
+        assert_eq!(import_data(&dst, &bundle).unwrap(), 1);
+        assert_eq!(
+            get_report(&dst, "2026-07-01").unwrap().unwrap().raw_notes,
+            "內容"
+        );
+        assert_eq!(
+            get_report_tags(&dst, "2026-07-01").unwrap(),
+            vec!["tag1".to_string()]
+        );
+        assert_eq!(
+            get_setting(&dst, "ai_command").unwrap().as_deref(),
+            Some("claude -p")
+        );
+    }
 }
