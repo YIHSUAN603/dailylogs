@@ -65,12 +65,6 @@ export const ASPECTS = [
   { key: "tomorrow", label: "明日" },
 ] as const;
 
-export type AspectKey = (typeof ASPECTS)[number]["key"];
-
-export function emptyCategory(name = ""): Category {
-  return { project: "", name, done: "", doing: "", blockers: "", tomorrow: "" };
-}
-
 export function emptyReport(date: string): Report {
   return {
     date,
