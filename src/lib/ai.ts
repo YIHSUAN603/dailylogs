@@ -31,7 +31,7 @@ const FORMAT_RULE = `請「只」輸出以「專案（大類）> 子分類 > 四
 
 規則：
 - 可以有多個專案（以「# 」開頭），每個專案底下可有多個子分類（以「## 」開頭）。
-- 每個子分類都要包含「完成 / 進行中 / 問題 / 明日」四個 ### 小節；該面向沒有內容就寫「- 無」。
+- 每個子分類都要包含「完成 / 進行中 / 問題 / 待辦」四個 ### 小節；該面向沒有內容就寫「- 無」。
 - 每個項目自成一行、以「- 」開頭，用語精簡專業。
 - 依專案歸納；若實在無法判斷專案，可只用一個專案名涵蓋。`;
 
@@ -66,7 +66,7 @@ ${doneToday.length ? doneToday.map(taskLine).join("\n") : "（無）"}
 ${doing.length ? doing.map(taskLine).join("\n") : "（無）"}`
       : "";
 
-  const prompt = `你是協助工程師撰寫「對主管的工作日報」的助理。請根據下方「零散記事」「目前草稿」與「工作面板的工作項目」，整理成專業、條列清楚、以分類為主的繁體中文日報，並讓主管讀了不會想追問或挑語病。請依專案或主題歸納分類。
+  const prompt = `你是協助工程師撰寫「對主管的工作日報」的助理。請根據下方「零散記事 / 草稿」與「工作面板的工作項目」，整理成專業、條列清楚、以分類為主的繁體中文日報，並讓主管讀了不會想追問或挑語病。請依專案或主題歸納分類。
 
 整理時請特別注意：
 - 用詞具體明確，避免「處理了一些」「做了相關調整」「優化了一下」這類含糊籠統的寫法；說清楚做了什麼、影響什麼。
@@ -79,10 +79,7 @@ ${doing.length ? doing.map(taskLine).join("\n") : "（無）"}`
 
 ${FORMAT_RULE}
 
-【零散記事】
-${report.raw_notes.trim() || "（無）"}
-
-【目前草稿】
+【零散記事 / 草稿】
 ${draftText(report)}${taskBlock}`;
   return (await runAi(prompt)).trim();
 }
@@ -143,7 +140,7 @@ export interface TaskDraft {
 }
 
 /** 從 AI 回應中解析出工項草稿：先試 JSON 陣列，失敗則退回逐行抓條列 */
-function parseTaskDrafts(raw: string): TaskDraft[] {
+export function parseTaskDrafts(raw: string): TaskDraft[] {
   // 容忍 ```json 包裹或多餘前後文：抓第一個 [ 到最後一個 ]
   const start = raw.indexOf("[");
   const end = raw.lastIndexOf("]");
@@ -217,7 +214,7 @@ ${list}`;
 }
 
 /** 把 AI 回應切成乾淨的標籤陣列（去符號、去空、最多 5 個） */
-function parseTags(out: string): string[] {
+export function parseTags(out: string): string[] {
   return out
     .split(/[,，\n]/)
     .map((t) => t.replace(/^[-#\s]+/, "").trim())
