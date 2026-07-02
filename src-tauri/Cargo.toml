@@ -1,6 +1,6 @@
 [package]
 name = "dailylogs"
-version = "2.3.0"
+version = "2.4.0"
 description = "日報告 — 撰寫日報的桌面應用程式"
 authors = ["you"]
 edition = "2021"
@@ -29,4 +29,5 @@ chrono = { version = "0.4", features = ["serde"] }
 shell-words = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 futures = "0.3"
+keyring = { version = "3", features = ["windows-native", "sync-secret-service"] }
 

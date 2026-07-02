@@ -1,10 +1,14 @@
 import { ASPECTS, type Category, type Report } from "../types";
 
+/** Date → YYYY-MM-DD（本地時區，避免 UTC 偏移） */
+export function dateStr(d: Date): string {
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 /** 取得本地時區的今天 YYYY-MM-DD */
 export function todayStr(): string {
-  const d = new Date();
-  const off = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - off).toISOString().slice(0, 10);
+  return dateStr(new Date());
 }
 
 /** 把面向欄位（一行一項）拆成項目陣列，去掉既有的項目符號 */

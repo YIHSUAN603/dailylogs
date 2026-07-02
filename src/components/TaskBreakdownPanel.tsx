@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { emptyTask, TASK_PRIORITIES, type Task, type TaskPriority } from "../types";
 import * as api from "../lib/api";
 import * as ai from "../lib/ai";
+import { toastError } from "../lib/toast";
 import ProjectInput from "./ProjectInput";
 
 interface Props {
@@ -27,13 +28,13 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
       if (typeof path !== "string") return;
       setInput(await api.readTextFile(path));
     } catch (e) {
-      alert(`讀取檔案失敗：${e}`);
+      toastError(`讀取檔案失敗：${e}`);
     }
   };
 
   const breakdown = async () => {
     if (!input.trim()) {
-      alert("請先輸入或匯入工作描述");
+      toastError("請先輸入或匯入工作描述");
       return;
     }
     setBusy("拆解中");
@@ -48,7 +49,7 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
         })),
       );
     } catch (e) {
-      alert(`AI 拆解失敗：${e}`);
+      toastError(`AI 拆解失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -64,7 +65,7 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
     if (!drafts) return;
     const valid = drafts.filter((d) => d.title.trim());
     if (valid.length === 0) {
-      alert("沒有可建立的工項（標題皆為空）");
+      toastError("沒有可建立的工項（標題皆為空）");
       return;
     }
     setBusy("建立中");
@@ -75,7 +76,7 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
       await onCreated();
       onClose();
     } catch (e) {
-      alert(`建立失敗：${e}`);
+      toastError(`建立失敗：${e}`);
     } finally {
       setBusy("");
     }

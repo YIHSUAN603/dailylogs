@@ -3,12 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask, open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   AI_COMMAND_KEY,
+  AI_TIMEOUT_KEY,
+  REPORT_TEMPLATE_KEY,
   GIT_AUTHOR_KEY,
   TFS_BASE_URL_KEY,
   TFS_COLLECTIONS_KEY,
-  TFS_PAT_KEY,
+  THEME_ACCENT_KEY,
+  THEME_MODE_KEY,
   getSetting,
   setSetting,
+  getTfsPat,
+  setTfsPat,
   runAi,
   tfsTestConnection,
   exportAll,
@@ -16,7 +21,7 @@ import {
   readTextFile,
 } from "../lib/api";
 import { todayStr } from "../lib/format";
-import { ACCENTS, type AccentName, type ThemeMode } from "../lib/theme";
+import { ACCENTS, isAccentName, isThemeMode, type AccentName, type ThemeMode } from "../lib/theme";
 
 interface Props {
   onClose: () => void;
@@ -28,15 +33,20 @@ interface Props {
 
 export default function SettingsView({ onClose, accent, mode, onAccentChange, onModeChange }: Props) {
   const [aiCommand, setAiCommand] = useState("");
+  const [aiTimeout, setAiTimeout] = useState("120");
+  const [aiTimeoutError, setAiTimeoutError] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState("");
   const [saved, setSaved] = useState(false);
+
+  const [reportTemplate, setReportTemplate] = useState("");
+  const [templateSaved, setTemplateSaved] = useState(false);
 
   const [gitAuthor, setGitAuthor] = useState("");
   const [tfsBaseUrl, setTfsBaseUrl] = useState("");
   const [tfsCollections, setTfsCollections] = useState<string[]>([]);
   const [newCollection, setNewCollection] = useState("");
-  const [tfsPat, setTfsPat] = useState("");
+  const [tfsPat, setTfsPatValue] = useState("");
   const [gitSaved, setGitSaved] = useState(false);
   const [tfsTesting, setTfsTesting] = useState(false);
   const [tfsTestResult, setTfsTestResult] = useState("");
@@ -45,10 +55,12 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
 
   useEffect(() => {
     getSetting(AI_COMMAND_KEY).then((v) => setAiCommand(v ?? "claude -p"));
+    getSetting(AI_TIMEOUT_KEY).then((v) => setAiTimeout(v ?? "120"));
+    getSetting(REPORT_TEMPLATE_KEY).then((v) => setReportTemplate(v ?? ""));
     getSetting(GIT_AUTHOR_KEY).then((v) => setGitAuthor(v ?? ""));
     getSetting(TFS_BASE_URL_KEY).then((v) => setTfsBaseUrl(v ?? ""));
     getSetting(TFS_COLLECTIONS_KEY).then((v) => setTfsCollections(v ? JSON.parse(v) : []));
-    getSetting(TFS_PAT_KEY).then((v) => setTfsPat(v ?? ""));
+    getTfsPat().then(setTfsPatValue);
   }, []);
 
   const addCollection = () => {
@@ -62,12 +74,12 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const removeCollection = (c: string) =>
     setTfsCollections(tfsCollections.filter((x) => x !== c));
 
-  // 把目前畫面上的 TFS 設定寫回 DB（測試與儲存共用）
+  // 把目前畫面上的 TFS 設定寫回 DB（測試與儲存共用）；PAT 走 keychain
   const persistTfs = async () => {
     await setSetting(GIT_AUTHOR_KEY, gitAuthor.trim());
     await setSetting(TFS_BASE_URL_KEY, tfsBaseUrl.trim());
     await setSetting(TFS_COLLECTIONS_KEY, JSON.stringify(tfsCollections));
-    await setSetting(TFS_PAT_KEY, tfsPat.trim());
+    await setTfsPat(tfsPat.trim());
   };
 
   const saveGit = async () => {
@@ -79,21 +91,55 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const testTfs = async () => {
     setTfsTesting(true);
     setTfsTestResult("");
+    // 後端從 settings/keychain 讀設定，測試需先暫存目前輸入值；測完還原原值，避免「測試＝偷偷存檔」
+    const orig = await Promise.all(
+      [GIT_AUTHOR_KEY, TFS_BASE_URL_KEY, TFS_COLLECTIONS_KEY].map(
+        async (k) => [k, await getSetting(k)] as const,
+      ),
+    );
+    const origPat = await getTfsPat();
     try {
-      await persistTfs(); // 用目前輸入的設定測試
+      await persistTfs();
       const count = await tfsTestConnection();
       setTfsTestResult(`✅ 連線成功，找到 ${count} 個 repo`);
     } catch (e) {
       setTfsTestResult(`❌ ${e}`);
     } finally {
+      for (const [k, v] of orig) {
+        if (v !== null) await setSetting(k, v);
+      }
+      await setTfsPat(origPat);
       setTfsTesting(false);
     }
   };
 
+  // 逾時欄位驗證：5–3600 的整數才合法；空字串視為重設回預設 120
+  const parseTimeout = (v: string): number | null => {
+    const s = v.trim();
+    if (!s) return 120;
+    const n = Number(s);
+    return Number.isInteger(n) && n >= 5 && n <= 3600 ? n : null;
+  };
+
   const save = async () => {
+    const timeout = parseTimeout(aiTimeout);
+    if (timeout === null) {
+      setAiTimeoutError("逾時秒數請輸入 5–3600 的整數");
+      return;
+    }
+    setAiTimeoutError("");
     await setSetting(AI_COMMAND_KEY, aiCommand.trim());
+    await setSetting(AI_TIMEOUT_KEY, String(timeout));
+    setAiTimeout(String(timeout));
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
+  };
+
+  const saveTemplate = async () => {
+    // 不 trim 內容本身：範本內的縮排與空行有意義
+    await setSetting(REPORT_TEMPLATE_KEY, reportTemplate);
+    setTemplateSaved(true);
+    window.setTimeout(() => setTemplateSaved(false), 1500);
   };
 
   const handleExport = async () => {
@@ -126,10 +172,19 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       const count = await importAll(json);
       // 設定可能被覆蓋，重新載入畫面上的值
       getSetting(AI_COMMAND_KEY).then((v) => setAiCommand(v ?? "claude -p"));
+      getSetting(AI_TIMEOUT_KEY).then((v) => setAiTimeout(v ?? "120"));
+      getSetting(REPORT_TEMPLATE_KEY).then((v) => setReportTemplate(v ?? ""));
       getSetting(GIT_AUTHOR_KEY).then((v) => setGitAuthor(v ?? ""));
       getSetting(TFS_BASE_URL_KEY).then((v) => setTfsBaseUrl(v ?? ""));
       getSetting(TFS_COLLECTIONS_KEY).then((v) => setTfsCollections(v ? JSON.parse(v) : []));
-      getSetting(TFS_PAT_KEY).then((v) => setTfsPat(v ?? ""));
+      getTfsPat().then(setTfsPatValue);
+      // 主題設定也可能被覆蓋，重套到畫面
+      getSetting(THEME_ACCENT_KEY).then((v) => {
+        if (isAccentName(v)) onAccentChange(v);
+      });
+      getSetting(THEME_MODE_KEY).then((v) => {
+        if (isThemeMode(v)) onModeChange(v);
+      });
       setBackupMsg(`✅ 已匯入 ${count} 份日報`);
     } catch (e) {
       setBackupMsg(`❌ 匯入失敗：${e}`);
@@ -137,15 +192,27 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   };
 
   const test = async () => {
+    const timeout = parseTimeout(aiTimeout);
+    if (timeout === null) {
+      setAiTimeoutError("逾時秒數請輸入 5–3600 的整數");
+      return;
+    }
+    setAiTimeoutError("");
     setTesting(true);
     setTestResult("");
+    // 後端從 settings 表讀命令與逾時，測試需先暫存目前輸入值；測完還原原值，避免「測試＝偷偷存檔」
+    const orig = await getSetting(AI_COMMAND_KEY);
+    const origTimeout = await getSetting(AI_TIMEOUT_KEY);
     try {
-      await setSetting(AI_COMMAND_KEY, aiCommand.trim()); // 用目前輸入的命令測試
+      await setSetting(AI_COMMAND_KEY, aiCommand.trim());
+      await setSetting(AI_TIMEOUT_KEY, String(timeout));
       const out = await runAi("請只回覆兩個字：可用");
       setTestResult(`✅ 回應：${out.slice(0, 200)}`);
     } catch (e) {
       setTestResult(`❌ ${e}`);
     } finally {
+      if (orig !== null) await setSetting(AI_COMMAND_KEY, orig);
+      if (origTimeout !== null) await setSetting(AI_TIMEOUT_KEY, origTimeout);
       setTesting(false);
     }
   };
@@ -221,6 +288,21 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
           className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
         />
         <div className="mt-3 flex items-center gap-2">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">逾時秒數</label>
+          <input
+            type="number"
+            min={5}
+            max={3600}
+            step={1}
+            value={aiTimeout}
+            onChange={(e) => setAiTimeout(e.target.value)}
+            placeholder="120"
+            className="w-28 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
+          />
+          <span className="text-xs text-slate-400 dark:text-slate-500">AI 命令超過此秒數即中止（預設 120，留空重設）</span>
+        </div>
+        {aiTimeoutError && <p className="mt-1 text-sm text-rose-600 dark:text-rose-400">{aiTimeoutError}</p>}
+        <div className="mt-3 flex items-center gap-2">
           <button
             onClick={save}
             className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
@@ -244,6 +326,29 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 p-5 dark:border-slate-700">
+        <h3 className="mb-1 font-semibold text-slate-800 dark:text-slate-100">日報範本</h3>
+        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+          新建某天日報時自動填入以下 Markdown；留空則維持空白日報。已存在的日報不受影響。
+        </p>
+        <textarea
+          rows={8}
+          value={reportTemplate}
+          onChange={(e) => setReportTemplate(e.target.value)}
+          placeholder={"例如：\n# 專案名稱\n\n## 完成\n\n- \n\n## 進行中\n\n- \n\n## 明日\n\n- "}
+          className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
+        />
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={saveTemplate}
+            className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
+          >
+            儲存
+          </button>
+          {templateSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">已儲存</span>}
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-lg border border-slate-200 p-5 dark:border-slate-700">
         <h3 className="mb-1 font-semibold text-slate-800 dark:text-slate-100">TFS 整合</h3>
         <p className="mb-3 text-sm text-slate-500 dark:text-slate-400 dark:text-slate-500">
           設定後，可在日報用「從 Git 草擬」一鍵把當天 TFS 上的 commit 轉成日報草稿。
@@ -263,11 +368,13 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
         <input
           type="password"
           value={tfsPat}
-          onChange={(e) => setTfsPat(e.target.value)}
+          onChange={(e) => setTfsPatValue(e.target.value)}
           placeholder="貼上 PAT"
           className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
         />
-        <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">PAT 只存在本機，不會包含在「匯出全部資料」的備份檔中。</p>
+        <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
+          PAT 存在系統的憑證管理員（keychain；系統不支援時退回本機資料庫），不會包含在「匯出全部資料」的備份檔中。
+        </p>
 
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">作者關鍵字（逗號分隔，留空＝全部）</label>
         <input
