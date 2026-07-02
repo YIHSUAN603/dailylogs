@@ -9,7 +9,9 @@ import {
   deleteSummary,
 } from "../lib/api";
 import { summarizeRange } from "../lib/ai";
+import { dateStr as fmt } from "../lib/format";
 import * as exporter from "../lib/export";
+import { toastError } from "../lib/toast";
 import DatePicker from "../components/DatePicker";
 import type { Report, SummaryKind, SummaryMeta } from "../types";
 
@@ -61,11 +63,6 @@ function last30Days(): [string, string] {
   const start = new Date(end);
   start.setDate(end.getDate() - 29);
   return [fmt(start), fmt(end)];
-}
-
-function fmt(d: Date): string {
-  const off = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - off).toISOString().slice(0, 10);
 }
 
 const KIND_LABEL: Record<SummaryKind, string> = {
@@ -121,12 +118,17 @@ export default function WeeklyView({ onClose, dark }: Props) {
   };
 
   const load = async () => {
+    if (start > end) {
+      toastError("起日不可晚於迄日");
+      return;
+    }
     setReports(await listReportsInRange(start, end));
   };
 
   const summarize = async () => {
     setBusy("彙整中");
     try {
+      if (start > end) throw new Error("起日不可晚於迄日");
       const rs = await listReportsInRange(start, end);
       setReports(rs);
       if (rs.length === 0) {
@@ -139,7 +141,7 @@ export default function WeeklyView({ onClose, dark }: Props) {
       setCurrentId(null);
       setTitle(defaultTitle(kind, start, end));
     } catch (e) {
-      alert(`彙整失敗：${e}`);
+      toastError(`彙整失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -160,7 +162,7 @@ export default function WeeklyView({ onClose, dark }: Props) {
       setCurrentId(id);
       await refreshHistory();
     } catch (e) {
-      alert(`儲存失敗：${e}`);
+      toastError(`儲存失敗：${e}`);
     } finally {
       setBusy("");
     }
@@ -236,6 +238,7 @@ export default function WeeklyView({ onClose, dark }: Props) {
                 onChange={(v) => {
                   setStart(v);
                   setPreset(null);
+                  setKind("custom"); // 手動改區間後不再屬於原本的週/月，避免預設標題與實際區間不符
                 }}
               />
             </div>
@@ -247,6 +250,7 @@ export default function WeeklyView({ onClose, dark }: Props) {
                 onChange={(v) => {
                   setEnd(v);
                   setPreset(null);
+                  setKind("custom");
                 }}
               />
             </div>
