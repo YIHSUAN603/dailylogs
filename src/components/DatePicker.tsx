@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { dateStr as fmt } from "../lib/format";
 
 interface Props {
   value: string; // YYYY-MM-DD
@@ -12,12 +13,6 @@ function parse(v: string): Date {
   const [y, m, d] = v.split("-").map(Number);
   if (!y || !m || !d) return new Date();
   return new Date(y, m - 1, d);
-}
-
-/** Date → YYYY-MM-DD（本地時區） */
-function fmt(d: Date): string {
-  const off = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - off).toISOString().slice(0, 10);
 }
 
 /**

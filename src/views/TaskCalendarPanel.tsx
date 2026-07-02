@@ -9,7 +9,7 @@ import {
   type TaskStatus,
   type TaskPriority,
 } from "../types";
-import { todayStr } from "../lib/format";
+import { dateStr as dsOf, todayStr } from "../lib/format";
 
 interface Props {
   tasks: Task[];
@@ -21,11 +21,7 @@ interface Props {
   onEdit: (t: Task) => void;
 }
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
-
-/** YYYY-MM-DD（本地時區，避免 UTC 偏移） */
-const dsOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 /** 狀態決定底色 */
 const STATUS_CHIP: Record<TaskStatus, string> = {
