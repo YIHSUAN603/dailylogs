@@ -17,7 +17,7 @@ npm run dev            # 僅 vite（瀏覽器無 Tauri API，invoke 會失敗，
 ```
 
 - Rust toolchain 在 `~/.cargo/bin`；非登入 shell 需 `export PATH="$HOME/.cargo/bin:$PATH"`。
-- 沒有測試框架；驗證前端改動用 `npm run build`（含 `tsc`），後端用 `cargo check`（在 `src-tauri/`）。
+- 測試：前端 vitest（`npm run test:run`，測試檔在 `src/lib/*.test.ts`）；後端 `cargo test`（`db.rs`/`tfs.rs` 內的 `#[cfg(test)]`，用 in-memory SQLite）。驗證編譯：前端 `npm run build`（含 `tsc`）、後端 `cargo check`（在 `src-tauri/`）。CI 另跑 `npm run lint`、`cargo fmt --check`、`cargo clippy -D warnings`。
 
 ### 在 WSLg 啟動（本機環境）
 
@@ -52,17 +52,17 @@ prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→�
 
 （舊版的 `parseCategories()` 解析、`draftFromCommits` 已移除；現在 FORMAT_RULE 只是排版建議，沒有「解析回 Category」的綁定契約。）
 
-### Git 整合
+### TFS 整合
 
-`src-tauri/src/git.rs`：`expand_repos` 把使用者設定的路徑展開成 repo 清單（路徑本身是 repo 就直接用；是資料夾就遞迴掃描，最深 5 層、跳過 `node_modules`/`target` 等）。`collect_commits` 對每個 repo 跑 `git log` 取指定日期、指定作者的 commit 標題，單一 repo 失敗會跳過不中斷。設定存 settings 表：`git_repos`（JSON 字串陣列）、`git_author`。
+`src-tauri/src/tfs.rs`：走地端 Azure DevOps（TFS）REST API（api-version 固定 3.0、PAT Basic Auth）。`collect_commits` 掃所有 collection 的 repo、取指定日期（本機時區，查詢窗放寬 ±1 天避開時區邊界）該作者的 commit 標題，單一 collection/repo 失敗會跳過不中斷，併發上限 10。作者比對是「逗號分隔關鍵字、不分大小寫包含」。設定存 settings 表：`tfs_base_url`、`tfs_collections`（JSON 陣列）、`git_author`；PAT 見下方設定儲存。
 
 ### 設定儲存
 
-所有設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。
+一般設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。**例外：TFS PAT** 走 `src-tauri/src/secret.rs`（`get_tfs_pat`/`set_tfs_pat` command）——優先存 OS keychain（Windows 憑證管理員 / Linux Secret Service），keychain 不可用（如 WSL）則退回 settings 表，讀取時會自動把舊明文搬進 keychain；匯出備份一律排除 PAT。
 
 ### 前端結構與狀態
 
-`src/App.tsx` 是唯一狀態中心：管理目前日報、清單、view 切換（`editor` / `settings` / `weekly`）。編輯採 **600ms 防抖自動存檔**（`handleChange`）；標籤變更則立即存檔。`ReportEditor.tsx` 用 `@uiw/react-md-editor`（內建工具列 / 並排即時預覽 / Tab 縮排 / Enter 接清單），onChange 只更新 `raw_notes`。`src/components/`（Sidebar, ReportEditor）、`src/views/`（SettingsView, WeeklyView）。
+`src/App.tsx` 是唯一狀態中心：管理目前日報、清單、view 切換（`editor` / `settings` / `weekly` / `work`）。編輯採 **600ms 防抖自動存檔**（`handleChange` + `pendingSave` ref；切換日期/刪除前會 flush/丟棄未觸發的存檔）。`ReportEditor` 以 `key={report.date}` 掛載，切日即重建，並在 AI 完成時丟棄已卸載元件的結果，避免寫進別天。全域提示走 `src/lib/toast.ts` + `<Toaster />`（勿再用 `alert()`）。`ReportEditor.tsx` 用 `@uiw/react-md-editor`（內建工具列 / 並排即時預覽 / Tab 縮排 / Enter 接清單），onChange 只更新 `raw_notes`。`src/components/`（Sidebar, ReportEditor, Toaster…）、`src/views/`（SettingsView, WeeklyView, WorkView）。
 
 ### 匯出
 
