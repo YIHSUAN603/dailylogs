@@ -2,6 +2,27 @@
 
 本檔案記錄本專案各版本的重要變更，格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
 
+## [2.7.0] - 2026-07-16
+
+### 新增
+
+- **多提供者儲存庫整合**：設定頁「GitHub 整合」擴充為「儲存庫整合」，GitHub 與 Azure DevOps（含企業內 TFS/ADS，雲端填 `https://dev.azure.com` + 組織名）可同時啟用；「從 Git 草擬」與工作面板「匯入專案/儲存庫」會合併所有已啟用來源，單一來源失敗（例如在家連不到公司 TFS）只提示警告、不影響其他來源。各來源可獨立測試連線；Azure PAT 與 GitHub token 一樣存 OS keychain、不隨備份匯出（舊版 `tfs_pat` 明文會自動搬移）。
+- **看板檢視**：工作面板新增「看板」頁簽，卡片可拖曳換狀態欄；「已完成」欄預設只顯示最近 7 天完成的項目。
+- **AI 敏捷拆解**：AI 拆解工項改用敏捷模板，產出使用者故事（含驗收條件、技術任務）。
+- **PDF 匯入**：AI 拆解面板的「匯入檔案」支援 `.pdf`（萃取文字層；掃描影像檔會提示無法擷取）。
+- **App logo 與各平台圖示**：新增應用程式圖示。
+- **版本號顯示**：Sidebar 底部與設定頁「關於」區段顯示目前 App 版本。
+
+### 修正
+
+- **Windows 下 AI CLI 讀不到 prompt**：Windows 改以命令列參數傳遞 prompt 給 AI CLI（Unix 維持 stdin），修正部分 CLI 讀取 piped stdin 不可靠導致無回應的問題。
+- **Windows 看板卡片無法拖曳**：關閉 WebView 原生 dragDrop 攔截（`dragDropEnabled: false`）。
+
+### 變更
+
+- 捲軸配色跟隨主題（淺色 slate-300/400、深色 slate-600/500）。
+- **應用程式識別碼改為 `com.arieschao.dailylogs`**：本機資料目錄與 keychain 名稱隨之變更——從舊版升級時，請把舊資料目錄（`%APPDATA%\com.richitech.dailylogs` / `~/Library/Application Support/com.richitech.dailylogs`）內容複製到新目錄，並重填一次整合 token/PAT。
+
 ## [2.4.0] - 2026-07-02
 
 ### 新增
