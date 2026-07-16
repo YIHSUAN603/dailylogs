@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 比對版本號
         env:
@@ -58,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 安裝 Tauri Linux 系統依賴
         if: matrix.name == 'Linux'
@@ -73,7 +73,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
