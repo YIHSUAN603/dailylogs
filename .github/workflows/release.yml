@@ -1,0 +1,101 @@
+# Release：推 v* tag → 版本一致性檢查 → 三平台打包安裝檔 → 建立 GitHub Release
+# 產物：Windows NSIS 安裝檔、macOS .dmg（未簽章）、Linux .deb / .AppImage
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CI: "true"
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------- 版本一致性檢查（fail fast）----------
+  check-version:
+    name: 檢查 tag == tauri.conf == Cargo.toml 版本
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 比對版本號
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag_ver="${TAG_NAME#v}"
+          conf_ver="$(jq -r .version src-tauri/tauri.conf.json)"
+          cargo_ver="$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
+          echo "tag=$tag_ver  tauri.conf=$conf_ver  Cargo.toml=$cargo_ver"
+          if [ "$tag_ver" != "$conf_ver" ] || [ "$tag_ver" != "$cargo_ver" ]; then
+            echo "::error::版本不一致：tag=$tag_ver, tauri.conf.json=$conf_ver, Cargo.toml=$cargo_ver"
+            exit 1
+          fi
+
+  # ---------- 三平台打包並上傳到同一個 GitHub Release ----------
+  build:
+    name: 打包（${{ matrix.name }}）
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            bundles: nsis
+          - name: macOS
+            os: macos-latest
+            bundles: dmg
+          - name: Linux
+            os: ubuntu-22.04
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安裝 Tauri Linux 系統依賴
+        if: matrix.name == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl wget file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: npm ci
+        run: npm ci
+
+      # tauri-action 會跑 beforeBuildCommand（npm run build）→ tauri build → 上傳安裝檔到 Release
+      - name: tauri build + 發佈 Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "DailyLogs v__VERSION__"
+          releaseBody: "詳見 CHANGELOG.md。macOS 版未簽章，首次開啟需於系統設定手動允許。"
+          releaseDraft: false
+          prerelease: false
+          args: --bundles ${{ matrix.bundles }}
