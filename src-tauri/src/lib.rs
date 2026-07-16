@@ -1,7 +1,9 @@
 mod ai;
+mod azure;
 mod commands;
 mod db;
 mod github;
+mod repo;
 mod secret;
 
 use commands::DbState;
@@ -39,18 +41,22 @@ pub fn run() {
             commands::write_text_file,
             commands::write_binary_file,
             commands::read_text_file,
+            commands::read_binary_file,
             commands::export_all,
             commands::import_all,
             commands::get_setting,
             commands::set_setting,
             commands::get_github_token,
             commands::set_github_token,
+            commands::get_azure_pat,
+            commands::set_azure_pat,
             commands::get_report_tags,
             commands::set_report_tags,
             commands::run_ai,
-            commands::github_collect_commits,
+            commands::repo_collect_commits,
+            commands::repo_list_projects,
             commands::github_test_connection,
-            commands::github_list_repos,
+            commands::azure_test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

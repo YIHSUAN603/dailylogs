@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "日報告 DailyLogs",
-  "version": "2.4.0",
-  "identifier": "com.richitech.dailylogs",
+  "version": "2.7.0",
+  "identifier": "com.arieschao.dailylogs",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1421",
@@ -14,7 +14,8 @@
       {
         "title": "日報告 DailyLogs",
         "width": 1100,
-        "height": 760
+        "height": 760,
+        "dragDropEnabled": false
       }
     ],
     "security": {

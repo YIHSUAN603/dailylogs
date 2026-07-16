@@ -1,6 +1,8 @@
 use crate::ai;
+use crate::azure::{self, AzureConfig};
 use crate::db::{self, Report, ReportMeta, Summary, SummaryMeta, Task};
 use crate::github::{self, GithubConfig};
+use crate::repo::{self, RepoCommits};
 use crate::secret;
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -14,11 +16,18 @@ const AI_COMMAND_KEY: &str = "ai_command";
 const DEFAULT_AI_COMMAND: &str = "claude -p";
 
 /// GitHub 設定 key
+const GITHUB_ENABLED_KEY: &str = "github_enabled"; // "1"/"0"；未設定時有 owner 即視為啟用（舊版升級相容）
 const GITHUB_API_URL_KEY: &str = "github_api_url";
 const GITHUB_OWNERS_KEY: &str = "github_owners"; // JSON 字串陣列（org 或使用者）
 const GITHUB_AUTHOR_KEY: &str = "github_author"; // 作者比對關鍵字（逗號分隔，包含比對）
 /// 未設定時的預設 GitHub API 位址
 const DEFAULT_GITHUB_API_URL: &str = "https://api.github.com";
+
+/// Azure DevOps（含 TFS/ADS）設定 key
+const AZURE_ENABLED_KEY: &str = "azure_enabled"; // "1"/"0"；未設定時視為停用
+const AZURE_BASE_URL_KEY: &str = "azure_base_url";
+const AZURE_COLLECTIONS_KEY: &str = "azure_collections"; // JSON 字串陣列（雲端為組織名）
+const AZURE_AUTHOR_KEY: &str = "azure_author"; // 作者比對關鍵字（逗號分隔，包含比對）
 
 /// AI 逾時秒數設定 key 與預設值
 const AI_TIMEOUT_KEY: &str = "ai_timeout_secs";
@@ -129,6 +138,13 @@ pub fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// 讀取二進位檔，以原始 bytes 回傳（給前端解析 PDF 等；不走 JSON 序列化）
+#[tauri::command]
+pub fn read_binary_file(path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// 匯出整個資料庫成 JSON 字串
 #[tauri::command]
 pub fn export_all(state: State<DbState>) -> Result<String, String> {
@@ -162,14 +178,28 @@ pub fn set_setting(state: State<DbState>, key: String, value: String) -> Result<
 #[tauri::command]
 pub fn get_github_token(state: State<DbState>) -> Result<String, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    secret::get_token(&conn)
+    secret::get(&conn, secret::GITHUB_TOKEN)
 }
 
 /// 寫入 GitHub token（keychain 優先，退回 settings 表）
 #[tauri::command]
 pub fn set_github_token(state: State<DbState>, value: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    secret::set_token(&conn, &value)
+    secret::set(&conn, secret::GITHUB_TOKEN, &value)
+}
+
+/// 讀取 Azure DevOps PAT（keychain 優先，退回 settings 表），沒有時回傳空字串
+#[tauri::command]
+pub fn get_azure_pat(state: State<DbState>) -> Result<String, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    secret::get(&conn, secret::AZURE_PAT)
+}
+
+/// 寫入 Azure DevOps PAT（keychain 優先，退回 settings 表）
+#[tauri::command]
+pub fn set_azure_pat(state: State<DbState>, value: String) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    secret::set(&conn, secret::AZURE_PAT, &value)
 }
 
 #[tauri::command]
@@ -206,28 +236,35 @@ pub async fn run_ai(state: State<'_, DbState>, prompt: String) -> Result<String,
     ai::run_ai(&command, &prompt, timeout_secs)
 }
 
-/// 從 settings 讀出 GitHub 連線設定（會鎖 DB；回傳前即放鎖，避免跨 await 持鎖）。
-fn load_github_config(state: &State<DbState>) -> Result<GithubConfig, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let api_url = db::get_setting(&conn, GITHUB_API_URL_KEY)
+/// 把逗號分隔的作者關鍵字切成清單（trim、去空）
+fn split_authors(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// 讀 settings 表的 JSON 字串陣列（key 不存在＝空陣列）
+fn get_json_list(conn: &Connection, key: &str) -> Result<Vec<String>, String> {
+    match db::get_setting(conn, key).map_err(|e| e.to_string())? {
+        Some(j) => serde_json::from_str(&j).map_err(|e| e.to_string()),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// 從 settings 讀出 GitHub 連線設定（呼叫端負責取鎖，並在 await 前放鎖）。
+fn load_github_config(conn: &Connection) -> Result<GithubConfig, String> {
+    let api_url = db::get_setting(conn, GITHUB_API_URL_KEY)
         .map_err(|e| e.to_string())?
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_GITHUB_API_URL.to_string());
-    let owners_json = db::get_setting(&conn, GITHUB_OWNERS_KEY).map_err(|e| e.to_string())?;
-    let token = secret::get_token(&conn)?;
-    let author = db::get_setting(&conn, GITHUB_AUTHOR_KEY)
-        .map_err(|e| e.to_string())?
-        .unwrap_or_default();
-
-    let owners: Vec<String> = match owners_json {
-        Some(j) => serde_json::from_str(&j).map_err(|e| e.to_string())?,
-        None => Vec::new(),
-    };
-    let authors: Vec<String> = author
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let owners = get_json_list(conn, GITHUB_OWNERS_KEY)?;
+    let token = secret::get(conn, secret::GITHUB_TOKEN)?;
+    let authors = split_authors(
+        &db::get_setting(conn, GITHUB_AUTHOR_KEY)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default(),
+    );
 
     if owners.is_empty() {
         return Err("尚未設定任何 owner（org 或使用者）".to_string());
@@ -244,27 +281,194 @@ fn load_github_config(state: &State<DbState>) -> Result<GithubConfig, String> {
     })
 }
 
-/// 從 GitHub 撈指定日期該作者的 commit，回傳組好的文字。沒有任何 commit 時回傳空字串。
-#[tauri::command]
-pub async fn github_collect_commits(
-    state: State<'_, DbState>,
-    date: String,
-) -> Result<String, String> {
-    let cfg = load_github_config(&state)?;
-    let collected = github::collect_commits(&cfg, &date).await?;
-    Ok(github::format_commits(&collected))
+/// 從 settings 讀出 Azure DevOps 連線設定（呼叫端負責取鎖，並在 await 前放鎖）。
+fn load_azure_config(conn: &Connection) -> Result<AzureConfig, String> {
+    let base_url = db::get_setting(conn, AZURE_BASE_URL_KEY)
+        .map_err(|e| e.to_string())?
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let collections = get_json_list(conn, AZURE_COLLECTIONS_KEY)?;
+    let pat = secret::get(conn, secret::AZURE_PAT)?;
+    let authors = split_authors(
+        &db::get_setting(conn, AZURE_AUTHOR_KEY)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default(),
+    );
+
+    if base_url.is_empty() {
+        return Err("尚未設定 Azure DevOps 位址".to_string());
+    }
+    if collections.is_empty() {
+        return Err("尚未設定任何 collection".to_string());
+    }
+    if pat.trim().is_empty() {
+        return Err("尚未設定 Azure DevOps PAT（Personal Access Token）".to_string());
+    }
+
+    Ok(AzureConfig {
+        base_url,
+        collections,
+        pat,
+        authors,
+    })
 }
 
-/// 測試 GitHub 連線：回傳所有 owner 的 repo 總數。
+/// GitHub 整合是否啟用：明確設定優先；未設定時有 owner 即視為啟用（舊版升級相容）
+fn github_enabled(conn: &Connection) -> Result<bool, String> {
+    match db::get_setting(conn, GITHUB_ENABLED_KEY).map_err(|e| e.to_string())? {
+        Some(v) => Ok(v == "1"),
+        None => Ok(!get_json_list(conn, GITHUB_OWNERS_KEY)?.is_empty()),
+    }
+}
+
+/// Azure DevOps 整合是否啟用：未設定時視為停用
+fn azure_enabled(conn: &Connection) -> Result<bool, String> {
+    Ok(db::get_setting(conn, AZURE_ENABLED_KEY)
+        .map_err(|e| e.to_string())?
+        .as_deref()
+        == Some("1"))
+}
+
+/// 一次讀出兩個提供者「已啟用者」的設定；停用＝None，
+/// 啟用但設定不完整＝Some(Err)（由呼叫端決定當警告或錯誤）。
+#[allow(clippy::type_complexity)]
+fn load_enabled_configs(
+    state: &State<DbState>,
+) -> Result<
+    (
+        Option<Result<GithubConfig, String>>,
+        Option<Result<AzureConfig, String>>,
+    ),
+    String,
+> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let gh = github_enabled(&conn)?.then(|| load_github_config(&conn));
+    let az = azure_enabled(&conn)?.then(|| load_azure_config(&conn));
+    Ok((gh, az))
+}
+
+/// 統一撈 commit 的結果：text 為組好的文字，warnings 為個別提供者的失敗訊息
+#[derive(serde::Serialize)]
+pub struct CollectedCommits {
+    pub text: String,
+    pub warnings: Vec<String>,
+}
+
+/// 從所有已啟用的儲存庫整合撈指定日期該作者的 commit，合併成一份文字。
+/// 單一提供者失敗記入 warnings 不中斷（例如在家連不到公司 TFS 仍可撈 GitHub）；
+/// 全部失敗才回 Err；沒有任何提供者啟用也回 Err。
+#[tauri::command]
+pub async fn repo_collect_commits(
+    state: State<'_, DbState>,
+    date: String,
+) -> Result<CollectedCommits, String> {
+    let (gh, az) = load_enabled_configs(&state)?;
+    if gh.is_none() && az.is_none() {
+        return Err("尚未啟用任何儲存庫整合（請到設定啟用 GitHub 或 Azure DevOps）".to_string());
+    }
+
+    let mut all: Vec<RepoCommits> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+    let mut succeeded = false;
+
+    if let Some(cfg) = gh {
+        match cfg {
+            Ok(cfg) => match github::collect_commits(&cfg, &date).await {
+                Ok(mut v) => {
+                    all.append(&mut v);
+                    succeeded = true;
+                }
+                Err(e) => warnings.push(format!("GitHub：{e}")),
+            },
+            Err(e) => warnings.push(format!("GitHub：{e}")),
+        }
+    }
+    if let Some(cfg) = az {
+        match cfg {
+            Ok(cfg) => match azure::collect_commits(&cfg, &date).await {
+                Ok(mut v) => {
+                    all.append(&mut v);
+                    succeeded = true;
+                }
+                Err(e) => warnings.push(format!("Azure DevOps：{e}")),
+            },
+            Err(e) => warnings.push(format!("Azure DevOps：{e}")),
+        }
+    }
+
+    if !succeeded {
+        return Err(warnings.join("；"));
+    }
+    // 跨提供者合併後重排，讓 format_commits 能以「連續同 project」分組
+    all.sort_by(|a, b| a.project.cmp(&b.project).then_with(|| a.repo.cmp(&b.repo)));
+    Ok(CollectedCommits {
+        text: repo::format_commits(&all),
+        warnings,
+    })
+}
+
+/// 列出所有已啟用整合的專案/儲存庫名稱（GitHub repo ∪ Azure 團隊專案，去重排序，
+/// 給工作面板匯入專案用）。單一提供者失敗略過，全部失敗才回 Err。
+#[tauri::command]
+pub async fn repo_list_projects(state: State<'_, DbState>) -> Result<Vec<String>, String> {
+    let (gh, az) = load_enabled_configs(&state)?;
+    if gh.is_none() && az.is_none() {
+        return Err("尚未啟用任何儲存庫整合（請到設定啟用 GitHub 或 Azure DevOps）".to_string());
+    }
+
+    let mut names: Vec<String> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut succeeded = false;
+
+    if let Some(cfg) = gh {
+        match cfg {
+            Ok(cfg) => match github::list_repos(&cfg).await {
+                Ok(mut v) => {
+                    names.append(&mut v);
+                    succeeded = true;
+                }
+                Err(e) => errors.push(format!("GitHub：{e}")),
+            },
+            Err(e) => errors.push(format!("GitHub：{e}")),
+        }
+    }
+    if let Some(cfg) = az {
+        match cfg {
+            Ok(cfg) => match azure::list_projects(&cfg).await {
+                Ok(mut v) => {
+                    names.append(&mut v);
+                    succeeded = true;
+                }
+                Err(e) => errors.push(format!("Azure DevOps：{e}")),
+            },
+            Err(e) => errors.push(format!("Azure DevOps：{e}")),
+        }
+    }
+
+    if !succeeded {
+        return Err(errors.join("；"));
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// 測試 GitHub 連線：回傳所有 owner 的 repo 總數（不看啟用開關，設定頁測試用）。
 #[tauri::command]
 pub async fn github_test_connection(state: State<'_, DbState>) -> Result<usize, String> {
-    let cfg = load_github_config(&state)?;
+    let cfg = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        load_github_config(&conn)?
+    };
     github::count_repos(&cfg).await
 }
 
-/// 列出所有 owner 的 repo 名稱（給工作面板匯入專案用）。
+/// 測試 Azure DevOps 連線：回傳所有 collection 的 repo 總數（不看啟用開關，設定頁測試用）。
 #[tauri::command]
-pub async fn github_list_repos(state: State<'_, DbState>) -> Result<Vec<String>, String> {
-    let cfg = load_github_config(&state)?;
-    github::list_repos(&cfg).await
+pub async fn azure_test_connection(state: State<'_, DbState>) -> Result<usize, String> {
+    let cfg = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        load_azure_config(&conn)?
+    };
+    azure::count_repos(&cfg).await
 }

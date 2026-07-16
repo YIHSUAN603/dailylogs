@@ -666,9 +666,10 @@ fn all_report_tags(conn: &Connection) -> rusqlite::Result<HashMap<String, Vec<St
 
 /// 所有設定
 fn all_settings(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
-    // 排除 token，避免敏感資訊隨備份檔外洩（含舊版 tfs_pat 明文）
-    let mut stmt = conn
-        .prepare("SELECT key, value FROM settings WHERE key NOT IN ('github_token', 'tfs_pat')")?;
+    // 排除 token / PAT，避免敏感資訊隨備份檔外洩（含舊版 tfs_pat 明文）
+    let mut stmt = conn.prepare(
+        "SELECT key, value FROM settings WHERE key NOT IN ('github_token', 'tfs_pat', 'azure_pat')",
+    )?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     rows.collect()
 }
@@ -841,9 +842,14 @@ mod tests {
         set_report_tags(&src, "2026-07-01", &["tag1".into()]).unwrap();
         set_setting(&src, "ai_command", "claude -p").unwrap();
         set_setting(&src, "github_token", "secret").unwrap();
+        set_setting(&src, "azure_pat", "secret2").unwrap();
+        set_setting(&src, "tfs_pat", "secret3").unwrap();
 
         let bundle = export_data(&src).unwrap();
-        assert!(!bundle.settings.contains_key("github_token")); // token 不得隨備份外洩
+        // token / PAT（含舊版 tfs_pat 明文）不得隨備份外洩
+        assert!(!bundle.settings.contains_key("github_token"));
+        assert!(!bundle.settings.contains_key("azure_pat"));
+        assert!(!bundle.settings.contains_key("tfs_pat"));
 
         let dst = mem_db();
         assert_eq!(import_data(&dst, &bundle).unwrap(), 1);
