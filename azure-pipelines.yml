@@ -32,7 +32,7 @@ stages:
         displayName: "前端 + Rust 驗證"
         timeoutInMinutes: 60
         pool:
-          name: "RichitechWindow" # ← 改成你的 self-hosted pool 名稱
+          name: "REPLACE_WITH_YOUR_POOL" # ← 改成你的 self-hosted pool 名稱
           demands:
             - Agent.OS -equals Windows_NT
             - node # agent 自訂 capability（見 README / 計畫）
@@ -82,7 +82,7 @@ stages:
         displayName: "打包 Windows 安裝檔"
         timeoutInMinutes: 120
         pool:
-          name: "RichitechWindow" # ← 同上
+          name: "REPLACE_WITH_YOUR_POOL" # ← 同上
           demands:
             - Agent.OS -equals Windows_NT
             - node
