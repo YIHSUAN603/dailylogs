@@ -25,3 +25,8 @@ dist-ssr
 
 # 日報資料備份（使用者資料，不進版控）
 日報備份_*.json
+
+._*
+
+# 本機 cargo 設定（exFAT 外接碟需把 target 目錄指到原生檔案系統）
+src-tauri/.cargo/
