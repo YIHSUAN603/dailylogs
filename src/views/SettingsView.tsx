@@ -30,6 +30,7 @@ import {
   readTextFile,
 } from "../lib/api";
 import { todayStr } from "../lib/format";
+import { checkForUpdates } from "../lib/updater";
 import { ACCENTS, isAccentName, isThemeMode, type AccentName, type ThemeMode } from "../lib/theme";
 
 interface Props {
@@ -74,6 +75,16 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const [backupMsg, setBackupMsg] = useState("");
 
   const [appVersion, setAppVersion] = useState("");
+  const [updateChecking, setUpdateChecking] = useState(false);
+
+  const handleCheckUpdate = async () => {
+    setUpdateChecking(true);
+    try {
+      await checkForUpdates({ silent: false });
+    } finally {
+      setUpdateChecking(false);
+    }
+  };
 
   useEffect(() => {
     getVersion()
@@ -713,9 +724,16 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
 
       <section className="mt-6 rounded-lg border border-slate-200 p-5 dark:border-slate-700">
         <h3 className="mb-1 font-semibold text-slate-800 dark:text-slate-100">關於</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
           日報告 DailyLogs{appVersion && ` v${appVersion}`}。
         </p>
+        <button
+          onClick={handleCheckUpdate}
+          disabled={updateChecking}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+        >
+          {updateChecking ? "檢查中…" : "檢查更新"}
+        </button>
       </section>
     </div>
   );

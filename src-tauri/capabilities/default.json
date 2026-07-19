@@ -9,6 +9,8 @@
     "clipboard-manager:allow-write-text",
     "dialog:allow-save",
     "dialog:allow-open",
-    "dialog:allow-ask"
+    "dialog:allow-ask",
+    "updater:default",
+    "process:default"
   ]
 }
