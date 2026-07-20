@@ -156,8 +156,10 @@ pub fn export_all(state: State<DbState>) -> Result<String, String> {
 /// 從 JSON 字串匯入資料（以日期 upsert 合併），回傳匯入的日報份數
 #[tauri::command]
 pub fn import_all(state: State<DbState>, json: String) -> Result<usize, String> {
-    let bundle: db::ExportBundle =
+    // 用寬鬆 DTO 反序列化，相容各世代舊備份（四段式 / category-first / 缺欄位）
+    let legacy: db::LegacyBundle =
         serde_json::from_str(&json).map_err(|e| format!("檔案格式不符：{}", e))?;
+    let bundle = db::legacy_bundle_to_export(legacy);
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::import_data(&conn, &bundle).map_err(|e| e.to_string())
 }

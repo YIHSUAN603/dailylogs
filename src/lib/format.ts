@@ -1,4 +1,5 @@
 import { ASPECTS, type Category, type Report } from "../types";
+import { markdownToHtml } from "./html";
 
 /** Date → YYYY-MM-DD（本地時區，避免 UTC 偏移） */
 export function dateStr(d: Date): string {
@@ -71,17 +72,10 @@ export function reportToEditableText(report: Report): string {
 
 /**
  * 從 commits 區塊（# 專案 外層標頭 + [repo] 子標頭 + "- 標題" 條列）中，
- * 去掉「條列文字已出現在 existing 內任一 "- " 條列」的項目。
+ * 去掉「條列文字已出現在 seen 集合」的項目。
  * 某專案 / repo 底下全被去除時，連同其標頭一起略過。沒有新項目時回傳空字串。
  */
-export function dedupeCommits(existing: string, commits: string): string {
-  const seen = new Set(
-    existing
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("- "))
-      .map((l) => l.slice(2).trim()),
-  );
+function filterNewCommits(seen: Set<string>, commits: string): string {
   const out: string[] = [];
   let pendingProject: string | null = null; // # 專案 標頭暫存
   let pendingRepo: string | null = null; // [repo] 標頭暫存
@@ -109,4 +103,34 @@ export function dedupeCommits(existing: string, commits: string): string {
     }
   }
   return out.join("\n");
+}
+
+/**
+ * 從 Markdown 現有內容去重（existing 內以 "- " 開頭的條列為已出現項目）。
+ * 回傳去重後的 commit Markdown 區塊。
+ */
+export function dedupeCommits(existing: string, commits: string): string {
+  const seen = new Set(
+    existing
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("- "))
+      .map((l) => l.slice(2).trim()),
+  );
+  return filterNewCommits(seen, commits);
+}
+
+/**
+ * 從 HTML 現有內容去重（existing 內所有 <li> 的文字為已出現項目），
+ * 過濾 commit Markdown 區塊後轉成 HTML 片段供附加；沒有新項目回傳空字串。
+ */
+export function dedupeCommitsHtml(existingHtml: string, commits: string): string {
+  const doc = new DOMParser().parseFromString(existingHtml, "text/html");
+  const seen = new Set(
+    Array.from(doc.querySelectorAll("li"))
+      .map((li) => (li.textContent ?? "").trim())
+      .filter(Boolean),
+  );
+  const md = filterNewCommits(seen, commits);
+  return md ? markdownToHtml(md) : "";
 }

@@ -23,6 +23,11 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let conn = db::open(&dir.join("dailylogs.db"))?;
+            // 更新後首次啟動：自動把舊 identifier 目錄的資料非破壞性搬進來（只跑一次）。
+            // best-effort：失敗只記錄、不中斷啟動（仍可用舊 app 匯出 JSON → 匯入當後備）。
+            if let Err(e) = db::migrate_legacy_data(&conn, &dir) {
+                eprintln!("[dailylogs] 舊資料自動遷移失敗（略過，不影響啟動）：{e}");
+            }
             app.manage(DbState(Mutex::new(conn)));
             Ok(())
         })

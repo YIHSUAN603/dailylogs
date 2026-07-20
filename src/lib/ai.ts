@@ -1,9 +1,10 @@
 import { type Report, type Task, TASK_STATUS_LABELS } from "../types";
 import { runAi } from "./api";
+import { htmlToPlain, markdownToHtml } from "./html";
 
-/** 取得目前日報的 Markdown 原文（給 AI 當輸入） */
+/** 取得目前日報的純文字（raw_notes 為 HTML，去標籤後給 AI 當輸入） */
 function draftText(report: Report): string {
-  return report.raw_notes.trim() || "（目前沒有內容）";
+  return htmlToPlain(report.raw_notes).trim() || "（目前沒有內容）";
 }
 
 /** 要求 AI 嚴格輸出的「分類為主 + 面向條列」格式說明 */
@@ -35,7 +36,7 @@ const FORMAT_RULE = `請「只」輸出以「專案（大類）> 子分類 > 四
 - 每個項目自成一行、以「- 」開頭，用語精簡專業。
 - 依專案歸納；若實在無法判斷專案，可只用一個專案名涵蓋。`;
 
-/** 零散記事 + 草稿 + 工作面板工項 → 分類為主的日報（回傳 Markdown 文字） */
+/** 零散記事 + 草稿 + 工作面板工項 → 分類為主的日報（AI 輸出 Markdown，轉成 HTML 回傳） */
 export async function organizeReport(
   report: Report,
   tasks: Task[],
@@ -81,10 +82,10 @@ ${FORMAT_RULE}
 
 【零散記事 / 草稿】
 ${draftText(report)}${taskBlock}`;
-  return (await runAi(prompt)).trim();
+  return markdownToHtml((await runAi(prompt)).trim());
 }
 
-/** 潤稿：保留內容只修語氣與錯字（回傳 Markdown 文字） */
+/** 潤稿：保留內容只修語氣與錯字（AI 輸出 Markdown，轉成 HTML 回傳） */
 export async function polishReport(report: Report): Promise<string> {
   const prompt = `請將以下「分類為主」的工作日報潤飾成一份「主管讀了不會想追問或挑語病」的版本。修正錯字與語氣，並在「保留原本的事實、分類與重點」的前提下調整用詞，不要新增或刪除實質內容。
 
@@ -99,7 +100,7 @@ ${FORMAT_RULE}
 
 【目前日報】
 ${draftText(report)}`;
-  return (await runAi(prompt)).trim();
+  return markdownToHtml((await runAi(prompt)).trim());
 }
 
 /** 把多份日報彙整成週報/月報（回傳 Markdown 文字） */
@@ -108,7 +109,7 @@ export async function summarizeRange(
   rangeLabel: string,
 ): Promise<string> {
   const daily = reports
-    .map((r) => `【${r.date}】\n${r.raw_notes.trim() || "（無內容）"}`)
+    .map((r) => `【${r.date}】\n${htmlToPlain(r.raw_notes).trim() || "（無內容）"}`)
     .join("\n\n");
 
   const prompt = `以下是我在「${rangeLabel}」期間每天的工作日報。請彙整成一份給主管看的「工作週報/月報」。

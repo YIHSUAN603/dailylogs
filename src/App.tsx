@@ -6,6 +6,7 @@ import WeeklyView from "./views/WeeklyView";
 import WorkView from "./views/WorkView";
 import { emptyReport, type Report, type ReportMeta, type SearchHit, type Task } from "./types";
 import { todayStr } from "./lib/format";
+import { markdownToHtml, looksLikeHtml } from "./lib/html";
 import { toastError } from "./lib/toast";
 import { checkForUpdates } from "./lib/updater";
 import Toaster from "./components/Toaster";
@@ -100,7 +101,13 @@ export default function App() {
           } catch {
             template = "";
           }
-          setReport(template.trim() ? { ...emptyReport(date), raw_notes: template } : emptyReport(date));
+          // raw_notes 現為 HTML；範本若為舊 Markdown 先轉成 HTML
+          const notes = template.trim()
+            ? looksLikeHtml(template)
+              ? template
+              : markdownToHtml(template)
+            : "";
+          setReport(notes ? { ...emptyReport(date), raw_notes: notes } : emptyReport(date));
         }
         setTags(await api.getReportTags(date));
         setView("editor");

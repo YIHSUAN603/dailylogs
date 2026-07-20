@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -227,8 +227,10 @@ pub fn search_reports(conn: &Connection, keyword: &str) -> rusqlite::Result<Vec<
                 }
             }
         }
-        if !raw_notes.trim().is_empty() {
-            segments.push(raw_notes.clone());
+        // raw_notes 現為 HTML；去標籤（含 <img> 內 base64）後才比對，避免污染命中與片段
+        let raw_text = strip_html(&raw_notes);
+        if !raw_text.trim().is_empty() {
+            segments.push(raw_text);
         }
         if let Some(tags) = tags_by_date.get(&date) {
             if !tags.is_empty() {
@@ -277,6 +279,28 @@ fn make_snippet(text: &str, keyword_lower: &str) -> String {
         snippet.push('…');
     }
     snippet
+}
+
+/// 去掉 HTML 標籤與常見實體，讓搜尋以純文字為準（<img> 內的 base64 隨標籤一併移除）。
+/// 手寫掃描以避免新增 regex 依賴。
+fn strip_html(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    for ch in raw.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    // 還原基本實體（&amp; 最後處理，避免二次解碼）
+    out.replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
 }
 
 /// 取得日期區間內（含頭尾）的所有日報，依日期由舊到新
@@ -706,6 +730,293 @@ pub fn import_data(conn: &Connection, bundle: &ExportBundle) -> rusqlite::Result
     Ok(bundle.reports.len())
 }
 
+// ── 舊 app 資料轉移 ──────────────────────────────────────────────
+// 兩條路徑共用：更新後自動遷移（讀舊 identifier 的 DB）、匯入舊備份 JSON（寬鬆反序列化）。
+// 兩者都只把舊資料還原成「有 categories 或 raw_notes」的 Report，交給前端惰性遷移為 HTML。
+
+/// 已知的舊版 bundle identifier（app data 目錄名）；更新後首次啟動據此尋找舊資料庫
+const LEGACY_IDENTIFIERS: &[&str] = &["com.richitech.dailylogs"];
+/// 自動遷移只跑一次的旗標（存 settings）
+const LEGACY_MIGRATED_KEY: &str = "legacy_auto_migrated";
+
+/// 匯入用的寬鬆日報 DTO：相容各世代備份（四段式 report 層級欄位 / category-first / 缺欄位）
+#[derive(Debug, Deserialize)]
+struct LegacyReport {
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    categories: Vec<Category>,
+    #[serde(default)]
+    raw_notes: String,
+    #[serde(default)]
+    updated_at: String,
+    // 四段式（<2.6.1）report 層級舊欄位
+    #[serde(default)]
+    done: String,
+    #[serde(default)]
+    doing: String,
+    #[serde(default)]
+    blockers: String,
+    #[serde(default)]
+    tomorrow: String,
+}
+
+/// 匯入用的寬鬆彙整 DTO（舊備份可能缺欄位）
+#[derive(Debug, Deserialize)]
+struct LegacySummary {
+    #[serde(default)]
+    id: Option<i64>,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    start_date: String,
+    #[serde(default)]
+    end_date: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+/// 匯入用的寬鬆 bundle DTO：未知/缺欄位一律預設，避免整包反序列化失敗
+#[derive(Debug, Deserialize)]
+pub struct LegacyBundle {
+    #[serde(default)]
+    reports: Vec<LegacyReport>,
+    #[serde(default)]
+    tags: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    settings: HashMap<String, String>,
+    #[serde(default)]
+    summaries: Vec<LegacySummary>,
+}
+
+/// 四段式的四個欄位若至少一項有內容，組成單一分類；全空則回傳空分類陣列
+fn four_aspects_to_categories(
+    done: String,
+    doing: String,
+    blockers: String,
+    tomorrow: String,
+) -> Vec<Category> {
+    if [&done, &doing, &blockers, &tomorrow]
+        .iter()
+        .any(|s| !s.trim().is_empty())
+    {
+        vec![Category {
+            project: String::new(),
+            name: String::new(),
+            done,
+            doing,
+            blockers,
+            tomorrow,
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
+fn legacy_report_to_report(r: LegacyReport) -> Report {
+    let status = if r.status.trim().is_empty() {
+        "draft".to_string()
+    } else {
+        r.status
+    };
+    let categories = if !r.categories.is_empty() {
+        r.categories
+    } else {
+        four_aspects_to_categories(r.done, r.doing, r.blockers, r.tomorrow)
+    };
+    Report {
+        date: r.date,
+        status,
+        categories,
+        raw_notes: r.raw_notes,
+        updated_at: r.updated_at,
+    }
+}
+
+fn legacy_summary_to_summary(s: LegacySummary) -> Summary {
+    Summary {
+        id: s.id,
+        kind: if s.kind.trim().is_empty() {
+            "weekly".to_string()
+        } else {
+            s.kind
+        },
+        start_date: s.start_date,
+        end_date: s.end_date,
+        title: s.title,
+        content: s.content,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+    }
+}
+
+/// 寬鬆 bundle → 標準 ExportBundle（供 import_all 用）
+pub fn legacy_bundle_to_export(b: LegacyBundle) -> ExportBundle {
+    ExportBundle {
+        version: 1,
+        exported_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        reports: b.reports.into_iter().map(legacy_report_to_report).collect(),
+        tags: b.tags,
+        settings: b.settings,
+        summaries: b
+            .summaries
+            .into_iter()
+            .map(legacy_summary_to_summary)
+            .collect(),
+    }
+}
+
+/// 某表是否存在指定欄位
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?; // 欄位順序：cid, name, type, ...
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// 某表是否存在
+fn table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|o| o.is_some())
+}
+
+/// 從一個（可能是任何世代 schema 的）舊連線讀出 ExportBundle
+fn read_legacy_bundle(old: &Connection) -> rusqlite::Result<ExportBundle> {
+    let reports: Vec<Report> = if has_column(old, "reports", "categories")? {
+        // category-first
+        let mut stmt = old.prepare(
+            "SELECT date, status, categories, raw_notes, updated_at FROM reports ORDER BY date ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let categories_json: String = r.get(2)?;
+            let categories: Vec<Category> =
+                json_or_default(&categories_json, "legacy reports.categories");
+            Ok(Report {
+                date: r.get(0)?,
+                status: r.get(1)?,
+                categories,
+                raw_notes: r.get(3)?,
+                updated_at: r.get(4)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    } else {
+        // 四段式：done/doing/blockers/tomorrow 在 report 層級
+        let mut stmt = old.prepare(
+            "SELECT date, status, done, doing, blockers, tomorrow, raw_notes, updated_at
+             FROM reports ORDER BY date ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Report {
+                date: r.get(0)?,
+                status: r.get(1)?,
+                categories: four_aspects_to_categories(r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?),
+                raw_notes: r.get(6)?,
+                updated_at: r.get(7)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let tags = if table_exists(old, "report_tags")? && table_exists(old, "tags")? {
+        all_report_tags(old)?
+    } else {
+        HashMap::new()
+    };
+    let settings = if table_exists(old, "settings")? {
+        all_settings(old)? // 已排除 token/PAT
+    } else {
+        HashMap::new()
+    };
+    let summaries = if table_exists(old, "summaries")? {
+        all_summaries(old)?
+    } else {
+        Vec::new()
+    };
+
+    Ok(ExportBundle {
+        version: 1,
+        exported_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        reports,
+        tags,
+        settings,
+        summaries,
+    })
+}
+
+/// 唯讀開啟舊版資料庫檔並讀出 ExportBundle
+pub fn read_legacy_db(path: &Path) -> rusqlite::Result<ExportBundle> {
+    let old = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    read_legacy_bundle(&old)
+}
+
+/// 非破壞性合併：只補現行庫沒有的日期／設定 key，絕不覆蓋現有資料。回傳新增日報數。
+fn merge_legacy(conn: &Connection, bundle: &ExportBundle) -> rusqlite::Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut added = 0usize;
+    for report in &bundle.reports {
+        if get_report(&tx, &report.date)?.is_none() {
+            save_report(&tx, report)?;
+            if let Some(tags) = bundle.tags.get(&report.date) {
+                set_report_tags(&tx, &report.date, tags)?;
+            }
+            added += 1;
+        }
+    }
+    for (key, value) in &bundle.settings {
+        if get_setting(&tx, key)?.is_none() {
+            set_setting(&tx, key, value)?;
+        }
+    }
+    for summary in &bundle.summaries {
+        // 以新列插入，避免與現有 id 衝突
+        let mut s = summary.clone();
+        s.id = None;
+        save_summary(&tx, &s)?;
+    }
+    tx.commit()?;
+    Ok(added)
+}
+
+/// 更新後首次啟動：偵測舊 identifier 的 app data 目錄並非破壞性搬遷舊資料（只跑一次）。
+/// current_dir 是現行 app data 目錄（其上層目錄含各 identifier 子目錄）。
+pub fn migrate_legacy_data(conn: &Connection, current_dir: &Path) -> rusqlite::Result<()> {
+    if get_setting(conn, LEGACY_MIGRATED_KEY)?.as_deref() == Some("1") {
+        return Ok(());
+    }
+    if let Some(parent) = current_dir.parent() {
+        for id in LEGACY_IDENTIFIERS {
+            let old_path = parent.join(id).join("dailylogs.db");
+            if old_path.exists() {
+                let bundle = read_legacy_db(&old_path)?;
+                let added = merge_legacy(conn, &bundle)?;
+                eprintln!("[dailylogs] 已自動從舊資料（{id}）遷移 {added} 份日報");
+                break; // 只搬第一個找到的舊庫
+            }
+        }
+    }
+    set_setting(conn, LEGACY_MIGRATED_KEY, "1")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,6 +1147,34 @@ mod tests {
     }
 
     #[test]
+    fn strip_html_removes_tags_and_entities() {
+        assert_eq!(strip_html("<p>你好<strong>世界</strong></p>"), "你好世界");
+        assert_eq!(
+            strip_html("<img src=\"data:image/png;base64,AAAA\">文字"),
+            "文字"
+        );
+        assert_eq!(strip_html("a &amp; b &lt;c&gt;d"), "a & b <c>d");
+    }
+
+    #[test]
+    fn search_matches_html_content_without_tags() {
+        let conn = mem_db();
+        // raw_notes 為 HTML（含圖片 base64），仍能以純文字命中，且片段不含標籤
+        save_report(
+            &conn,
+            &report(
+                "2026-07-03",
+                "<h2>登入</h2><p>修正<strong>登入</strong>頁</p><img src=\"data:image/png;base64,ZZZ\">",
+            ),
+        )
+        .unwrap();
+        let hits = search_reports(&conn, "登入").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(!hits[0].snippet.contains('<'));
+        assert!(!hits[0].snippet.contains("base64"));
+    }
+
+    #[test]
     fn export_import_roundtrip_excludes_token() {
         let src = mem_db();
         save_report(&src, &report("2026-07-01", "內容")).unwrap();
@@ -865,5 +1204,166 @@ mod tests {
             get_setting(&dst, "ai_command").unwrap().as_deref(),
             Some("claude -p")
         );
+    }
+
+    // ── 舊資料轉移 ──────────────────────────────────────────────
+
+    /// 建一個四段式 schema（無 categories 欄）的記憶體庫
+    fn four_aspect_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE reports (
+                date TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'draft',
+                done TEXT NOT NULL DEFAULT '', doing TEXT NOT NULL DEFAULT '',
+                blockers TEXT NOT NULL DEFAULT '', tomorrow TEXT NOT NULL DEFAULT '',
+                raw_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn read_legacy_bundle_four_aspect_schema() {
+        let old = four_aspect_db();
+        old.execute(
+            "INSERT INTO reports (date, status, done, doing, blockers, tomorrow, raw_notes, created_at, updated_at)
+             VALUES ('2026-05-01', 'final', '完成的事', '', '', '明天做', '', 't', 't')",
+            [],
+        )
+        .unwrap();
+        old.execute(
+            "INSERT INTO settings (key, value) VALUES ('ai_command', 'claude -p'), ('github_token', 'secret')",
+            [],
+        )
+        .unwrap();
+
+        let bundle = read_legacy_bundle(&old).unwrap();
+        assert_eq!(bundle.reports.len(), 1);
+        let cats = &bundle.reports[0].categories;
+        assert_eq!(cats.len(), 1);
+        assert_eq!(cats[0].done, "完成的事");
+        assert_eq!(cats[0].tomorrow, "明天做");
+        assert_eq!(bundle.reports[0].status, "final");
+        // 舊 schema 無 tags/summaries 表 → 空；token 被排除
+        assert!(bundle.tags.is_empty());
+        assert!(bundle.summaries.is_empty());
+        assert_eq!(
+            bundle.settings.get("ai_command").map(String::as_str),
+            Some("claude -p")
+        );
+        assert!(!bundle.settings.contains_key("github_token"));
+    }
+
+    #[test]
+    fn read_legacy_bundle_category_first_schema() {
+        let old = mem_db(); // 現行/category-first schema 有 categories 欄
+        let mut r = report("2026-05-02", "");
+        r.categories = vec![Category {
+            project: "專案X".into(),
+            name: "模組A".into(),
+            done: "做完".into(),
+            doing: String::new(),
+            blockers: String::new(),
+            tomorrow: String::new(),
+        }];
+        save_report(&old, &r).unwrap();
+
+        let bundle = read_legacy_bundle(&old).unwrap();
+        assert_eq!(bundle.reports.len(), 1);
+        assert_eq!(bundle.reports[0].categories.len(), 1);
+        assert_eq!(bundle.reports[0].categories[0].name, "模組A");
+    }
+
+    #[test]
+    fn merge_legacy_is_nondestructive() {
+        let main = mem_db();
+        save_report(&main, &report("2026-07-01", "現有內容")).unwrap();
+        set_setting(&main, "ai_command", "keep").unwrap();
+
+        let bundle = ExportBundle {
+            version: 1,
+            exported_at: String::new(),
+            reports: vec![
+                report("2026-07-01", "舊-不該覆蓋"),
+                report("2026-07-02", "新增"),
+            ],
+            tags: HashMap::from([("2026-07-02".to_string(), vec!["t".to_string()])]),
+            settings: HashMap::from([
+                ("ai_command".to_string(), "OLD".to_string()),
+                ("new_key".to_string(), "v".to_string()),
+            ]),
+            summaries: Vec::new(),
+        };
+
+        let added = merge_legacy(&main, &bundle).unwrap();
+        assert_eq!(added, 1); // 只新增 2026-07-02
+        assert_eq!(
+            get_report(&main, "2026-07-01").unwrap().unwrap().raw_notes,
+            "現有內容" // 未被覆蓋
+        );
+        assert_eq!(
+            get_report(&main, "2026-07-02").unwrap().unwrap().raw_notes,
+            "新增"
+        );
+        assert_eq!(
+            get_setting(&main, "ai_command").unwrap().as_deref(),
+            Some("keep")
+        ); // 未覆蓋
+        assert_eq!(get_setting(&main, "new_key").unwrap().as_deref(), Some("v"));
+        assert_eq!(
+            get_report_tags(&main, "2026-07-02").unwrap(),
+            vec!["t".to_string()]
+        );
+    }
+
+    #[test]
+    fn migrate_runs_once_and_sets_flag() {
+        let conn = mem_db();
+        // 指向一個沒有任何舊 identifier 子目錄的路徑：不搬任何東西，但會設旗標
+        let dir = std::env::temp_dir().join("dailylogs_test_no_legacy");
+        migrate_legacy_data(&conn, &dir).unwrap();
+        assert_eq!(
+            get_setting(&conn, LEGACY_MIGRATED_KEY).unwrap().as_deref(),
+            Some("1")
+        );
+
+        // 旗標已設 → 第二次呼叫直接返回（不因路徑而出錯）
+        migrate_legacy_data(&conn, &dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_json_four_aspect_imports() {
+        let json = r#"{"version":1,"reports":[
+            {"date":"2026-01-01","status":"final","done":"做了A","doing":"","blockers":"","tomorrow":"明天B","raw_notes":""}
+        ],"tags":{},"settings":{}}"#;
+        let b: LegacyBundle = serde_json::from_str(json).unwrap();
+        let ex = legacy_bundle_to_export(b);
+        assert_eq!(ex.reports.len(), 1);
+        assert_eq!(ex.reports[0].status, "final");
+        assert_eq!(ex.reports[0].categories.len(), 1);
+        assert_eq!(ex.reports[0].categories[0].done, "做了A");
+        assert_eq!(ex.reports[0].categories[0].tomorrow, "明天B");
+    }
+
+    #[test]
+    fn legacy_json_category_first_and_missing_fields() {
+        // category-first 原樣保留；缺 tags/settings/summaries 也不失敗
+        let json = r#"{"reports":[
+            {"date":"2026-02-02","status":"","categories":[{"project":"P","name":"N","done":"D","doing":"","blockers":"","tomorrow":""}],"raw_notes":"","updated_at":""}
+        ]}"#;
+        let b: LegacyBundle = serde_json::from_str(json).unwrap();
+        let ex = legacy_bundle_to_export(b);
+        assert_eq!(ex.reports.len(), 1);
+        assert_eq!(ex.reports[0].status, "draft"); // 空 status → draft
+        assert_eq!(ex.reports[0].categories.len(), 1);
+        assert_eq!(ex.reports[0].categories[0].name, "N");
+
+        // 只有 date 的最小報告：categories 空、raw_notes 空，不 panic
+        let min: LegacyBundle =
+            serde_json::from_str(r#"{"reports":[{"date":"2026-03-03"}]}"#).unwrap();
+        let ex2 = legacy_bundle_to_export(min);
+        assert!(ex2.reports[0].categories.is_empty());
     }
 }
