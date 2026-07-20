@@ -2,6 +2,13 @@
 
 本檔案記錄本專案各版本的重要變更，格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
 
+## [2.8.1] - 2026-07-20
+
+### 修正
+
+- **自動更新的 `latest.json` 未隨 Release 發佈**：`productName` 含中文與空白導致 GitHub asset 檔名被淨化後與 CI 比對不符，更新資訊檔一直被跳過上傳，自動更新端點 404。`productName` 改為 `DailyLogs`（視窗標題不變，仍為「日報告 DailyLogs」；作業系統的應用程式清單、安裝檔檔名改顯示 `DailyLogs`）。
+- **更新包簽章金鑰更換**：原簽章私鑰與密碼不符導致 CI 簽章失敗，已重新產生金鑰對；v2.8.0 的更新包簽章即以新金鑰簽發。
+
 ## [2.8.0] - 2026-07-20
 
 ### 新增
