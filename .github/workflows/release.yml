@@ -99,6 +99,8 @@ jobs:
           tagName: v__VERSION__
           releaseName: "DailyLogs v__VERSION__"
           releaseBody: "詳見 CHANGELOG.md。macOS 版未簽章，首次開啟需於系統設定手動允許。"
-          releaseDraft: false
+          # 以草稿建立：發版流程寫完 release note 後才手動發布（gh release edit --draft=false）。
+          # 草稿不算 latest，releases/latest/download/latest.json 在發布前不會被自動更新看到，避免使用者在 note 未定稿前就收到更新提示。
+          releaseDraft: true
           prerelease: false
           args: --bundles ${{ matrix.bundles }}
