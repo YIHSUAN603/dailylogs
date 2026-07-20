@@ -24,7 +24,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVCMDQyREE5QjgzN0Y2ODMKUldTRDlqZTRxUzBFV3hhRXNOVmppK1hzc2l4WGx5UVZxNVlmTm0vNVV4eUFDWHNUTm5EODU4akcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxMjc3NDFEMDI1NzM3QzcKUldUSE4xY0NIWFFuVVJiWUUxVGt1ZjV4TUVrUHJPMFdKZ3cySEFlTVA1N3NlMFNvVlJWdUIxZzkK",
       "endpoints": [
         "https://github.com/YIHSUAN603/dailylogs/releases/latest/download/latest.json"
       ]
