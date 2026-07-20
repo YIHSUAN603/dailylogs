@@ -28,6 +28,10 @@ pub fn run() {
             if let Err(e) = db::migrate_legacy_data(&conn, &dir) {
                 eprintln!("[dailylogs] 舊資料自動遷移失敗（略過，不影響啟動）：{e}");
             }
+            // 舊版單例 GitHub/Azure 設定 → repo_providers 清單（只跑一次；best-effort）
+            if let Err(e) = commands::migrate_repo_providers(&conn) {
+                eprintln!("[dailylogs] 儲存庫來源設定遷移失敗（略過，不影響啟動）：{e}");
+            }
             app.manage(DbState(Mutex::new(conn)));
             Ok(())
         })
@@ -53,17 +57,14 @@ pub fn run() {
             commands::import_all,
             commands::get_setting,
             commands::set_setting,
-            commands::get_github_token,
-            commands::set_github_token,
-            commands::get_azure_pat,
-            commands::set_azure_pat,
+            commands::get_provider_secret,
+            commands::set_provider_secret,
             commands::get_report_tags,
             commands::set_report_tags,
             commands::run_ai,
             commands::repo_collect_commits,
             commands::repo_list_projects,
-            commands::github_test_connection,
-            commands::azure_test_connection,
+            commands::repo_test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

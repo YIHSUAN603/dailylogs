@@ -76,24 +76,14 @@ export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
 }
 
-/** 讀取 GitHub token（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
-export function getGithubToken(): Promise<string> {
-  return invoke("get_github_token");
+/** 讀取某來源（provider id）的 token/PAT（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
+export function getProviderSecret(id: string): Promise<string> {
+  return invoke("get_provider_secret", { id });
 }
 
-/** 寫入 GitHub token（OS keychain 優先，退回 settings 表） */
-export function setGithubToken(value: string): Promise<void> {
-  return invoke("set_github_token", { value });
-}
-
-/** 讀取 Azure DevOps PAT（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
-export function getAzurePat(): Promise<string> {
-  return invoke("get_azure_pat");
-}
-
-/** 寫入 Azure DevOps PAT（OS keychain 優先，退回 settings 表） */
-export function setAzurePat(value: string): Promise<void> {
-  return invoke("set_azure_pat", { value });
+/** 寫入某來源（provider id）的 token/PAT（空字串＝刪除；OS keychain 優先，退回 settings 表） */
+export function setProviderSecret(id: string, value: string): Promise<void> {
+  return invoke("set_provider_secret", { id, value });
 }
 
 /** 取得某日標籤 */
@@ -122,14 +112,25 @@ export function collectCommits(date: string): Promise<CollectedCommits> {
   return invoke("repo_collect_commits", { date });
 }
 
-/** 測試 GitHub 連線，回傳所有 owner 的 repo 總數 */
-export function githubTestConnection(): Promise<number> {
-  return invoke("github_test_connection");
+/** 一筆儲存庫來源（GitHub 或 Azure DevOps）；token/PAT 另走 getProviderSecret/setProviderSecret */
+export interface RepoProvider {
+  id: string;
+  type: "github" | "azure";
+  name: string;
+  enabled: boolean;
+  /** 作者比對關鍵字（逗號分隔，包含比對） */
+  author: string;
+  // type === "github"
+  apiUrl?: string; // 空＝https://api.github.com
+  owners?: string[];
+  // type === "azure"
+  baseUrl?: string;
+  collections?: string[];
 }
 
-/** 測試 Azure DevOps 連線，回傳所有 collection 的 repo 總數 */
-export function azureTestConnection(): Promise<number> {
-  return invoke("azure_test_connection");
+/** 測試單一來源連線（直接吃傳入的設定與秘密，無存檔副作用），回傳 repo 總數 */
+export function repoTestConnection(provider: RepoProvider, secret: string): Promise<number> {
+  return invoke("repo_test_connection", { provider, secret });
 }
 
 /** 列出所有已啟用整合的專案/儲存庫名稱（GitHub repo ∪ Azure 團隊專案，給工作面板匯入用） */
@@ -161,14 +162,7 @@ export function importAll(json: string): Promise<number> {
 export const AI_COMMAND_KEY = "ai_command";
 export const AI_TIMEOUT_KEY = "ai_timeout_secs"; // AI 逾時秒數（正整數字串；須與 commands.rs 的 AI_TIMEOUT_KEY 一致）
 export const REPORT_TEMPLATE_KEY = "report_template"; // 新建日報時預填的 Markdown 範本
-export const GITHUB_ENABLED_KEY = "github_enabled"; // "1"/"0"；未設定時有 owner 即視為啟用（舊版升級相容）
-export const GITHUB_API_URL_KEY = "github_api_url"; // GitHub REST API 位址（空＝預設 api.github.com）
-export const GITHUB_OWNERS_KEY = "github_owners"; // owner（org 或使用者）JSON 字串陣列
-export const GITHUB_AUTHOR_KEY = "github_author"; // 作者比對關鍵字（逗號分隔，包含比對 login/name/email）
-export const AZURE_ENABLED_KEY = "azure_enabled"; // "1"/"0"；未設定時視為停用
-export const AZURE_BASE_URL_KEY = "azure_base_url"; // 含 collection 之前的位址（TFS/ADS 或 https://dev.azure.com）
-export const AZURE_COLLECTIONS_KEY = "azure_collections"; // collection（雲端為組織名）JSON 字串陣列
-export const AZURE_AUTHOR_KEY = "azure_author"; // 作者比對關鍵字（逗號分隔，包含比對 author.name）
+export const REPO_PROVIDERS_KEY = "repo_providers"; // 儲存庫來源清單（RepoProvider[] JSON 字串）
 export const REPO_PROJECTS_KEY = "repo_projects"; // 匯入的專案/儲存庫名稱（JSON 陣列）
 export const LEGACY_GITHUB_REPOS_KEY = "github_repos"; // 舊版匯入清單 key（僅供讀取 fallback）
 export const THEME_ACCENT_KEY = "theme_accent"; // 主色名稱（AccentName）

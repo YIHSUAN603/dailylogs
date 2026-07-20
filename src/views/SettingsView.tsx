@@ -6,29 +6,20 @@ import {
   AI_COMMAND_KEY,
   AI_TIMEOUT_KEY,
   REPORT_TEMPLATE_KEY,
-  GITHUB_ENABLED_KEY,
-  GITHUB_AUTHOR_KEY,
-  GITHUB_API_URL_KEY,
-  GITHUB_OWNERS_KEY,
-  AZURE_ENABLED_KEY,
-  AZURE_BASE_URL_KEY,
-  AZURE_COLLECTIONS_KEY,
-  AZURE_AUTHOR_KEY,
+  REPO_PROVIDERS_KEY,
   THEME_ACCENT_KEY,
   THEME_MODE_KEY,
   getSetting,
   setSetting,
-  getGithubToken,
-  setGithubToken,
-  getAzurePat,
-  setAzurePat,
+  getProviderSecret,
+  setProviderSecret,
   runAi,
-  githubTestConnection,
-  azureTestConnection,
   exportAll,
   importAll,
   readTextFile,
+  type RepoProvider,
 } from "../lib/api";
+import RepoProviderCard from "../components/RepoProviderCard";
 import { todayStr } from "../lib/format";
 import { checkForUpdates } from "../lib/updater";
 import { ACCENTS, isAccentName, isThemeMode, type AccentName, type ThemeMode } from "../lib/theme";
@@ -52,25 +43,11 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const [reportTemplate, setReportTemplate] = useState("");
   const [templateSaved, setTemplateSaved] = useState(false);
 
-  const [githubEnabled, setGithubEnabled] = useState(false);
-  const [githubAuthor, setGithubAuthor] = useState("");
-  const [githubApiUrl, setGithubApiUrl] = useState("");
-  const [githubOwners, setGithubOwners] = useState<string[]>([]);
-  const [newOwner, setNewOwner] = useState("");
-  const [githubToken, setGithubTokenValue] = useState("");
-  const [githubSaved, setGithubSaved] = useState(false);
-  const [githubTesting, setGithubTesting] = useState(false);
-  const [githubTestResult, setGithubTestResult] = useState("");
-
-  const [azureEnabled, setAzureEnabled] = useState(false);
-  const [azureBaseUrl, setAzureBaseUrl] = useState("");
-  const [azureCollections, setAzureCollections] = useState<string[]>([]);
-  const [newCollection, setNewCollection] = useState("");
-  const [azurePat, setAzurePatValue] = useState("");
-  const [azureAuthor, setAzureAuthor] = useState("");
-  const [azureSaved, setAzureSaved] = useState(false);
-  const [azureTesting, setAzureTesting] = useState(false);
-  const [azureTestResult, setAzureTestResult] = useState("");
+  // 儲存庫來源清單（唯一內容來源）＋各來源初次載入的秘密（id → token/PAT）
+  const [providers, setProviders] = useState<RepoProvider[]>([]);
+  const [providerSecrets, setProviderSecrets] = useState<Record<string, string>>({});
+  const [newlyAdded, setNewlyAdded] = useState<Set<string>>(new Set());
+  const [newProviderType, setNewProviderType] = useState<RepoProvider["type"]>("github");
 
   const [backupMsg, setBackupMsg] = useState("");
 
@@ -92,22 +69,47 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       .catch(() => {}); // 純瀏覽器 dev 模式無 Tauri API，拿不到就不顯示
   }, []);
 
-  // 讀出整合設定並填回畫面（初始化與匯入備份後共用）
+  // 讀出來源清單與各來源秘密並填回畫面（初始化與匯入備份後共用）
   const loadRepoSettings = async () => {
-    const owners: string[] = JSON.parse((await getSetting(GITHUB_OWNERS_KEY)) ?? "[]");
-    setGithubOwners(owners);
-    // 啟用開關未設定時：GitHub 有 owner 即視為啟用（與後端一致，舊版升級相容）
-    const ghEnabled = await getSetting(GITHUB_ENABLED_KEY);
-    setGithubEnabled(ghEnabled !== null ? ghEnabled === "1" : owners.length > 0);
-    getSetting(GITHUB_AUTHOR_KEY).then((v) => setGithubAuthor(v ?? ""));
-    getSetting(GITHUB_API_URL_KEY).then((v) => setGithubApiUrl(v ?? ""));
-    getGithubToken().then(setGithubTokenValue);
+    const raw = await getSetting(REPO_PROVIDERS_KEY);
+    const list: RepoProvider[] = raw ? JSON.parse(raw) : [];
+    setProviders(list);
+    setNewlyAdded(new Set());
+    const entries = await Promise.all(
+      list.map(async (p) => [p.id, await getProviderSecret(p.id)] as const),
+    );
+    setProviderSecrets(Object.fromEntries(entries));
+  };
 
-    getSetting(AZURE_ENABLED_KEY).then((v) => setAzureEnabled(v === "1"));
-    getSetting(AZURE_BASE_URL_KEY).then((v) => setAzureBaseUrl(v ?? ""));
-    getSetting(AZURE_COLLECTIONS_KEY).then((v) => setAzureCollections(v ? JSON.parse(v) : []));
-    getSetting(AZURE_AUTHOR_KEY).then((v) => setAzureAuthor(v ?? ""));
-    getAzurePat().then(setAzurePatValue);
+  // 把整份清單寫回 DB
+  const persistProviders = (list: RepoProvider[]) =>
+    setSetting(REPO_PROVIDERS_KEY, JSON.stringify(list));
+
+  const addProvider = () => {
+    const p: RepoProvider = {
+      id: crypto.randomUUID(),
+      type: newProviderType,
+      name: "",
+      enabled: false,
+      author: "",
+      ...(newProviderType === "github" ? { apiUrl: "", owners: [] } : { baseUrl: "", collections: [] }),
+    };
+    setProviders((prev) => [...prev, p]);
+    setNewlyAdded((prev) => new Set(prev).add(p.id)); // 新卡預設展開
+  };
+
+  const saveProvider = async (updated: RepoProvider, secret: string) => {
+    const next = providers.map((p) => (p.id === updated.id ? updated : p));
+    setProviders(next);
+    await persistProviders(next);
+    await setProviderSecret(updated.id, secret);
+  };
+
+  const removeProvider = async (id: string) => {
+    const next = providers.filter((p) => p.id !== id);
+    setProviders(next);
+    await persistProviders(next);
+    await setProviderSecret(id, ""); // 清掉 keychain/settings 的秘密
   };
 
   useEffect(() => {
@@ -116,109 +118,6 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
     getSetting(REPORT_TEMPLATE_KEY).then((v) => setReportTemplate(v ?? ""));
     void loadRepoSettings();
   }, []);
-
-  const addOwner = () => {
-    const o = newOwner.trim();
-    if (o && !githubOwners.includes(o)) {
-      setGithubOwners([...githubOwners, o]);
-    }
-    setNewOwner("");
-  };
-
-  const removeOwner = (o: string) => setGithubOwners(githubOwners.filter((x) => x !== o));
-
-  const addCollection = () => {
-    const c = newCollection.trim();
-    if (c && !azureCollections.includes(c)) {
-      setAzureCollections([...azureCollections, c]);
-    }
-    setNewCollection("");
-  };
-
-  const removeCollection = (c: string) =>
-    setAzureCollections(azureCollections.filter((x) => x !== c));
-
-  // 把目前畫面上的 GitHub 設定寫回 DB（測試與儲存共用；enabled 只在儲存時寫）；token 走 keychain
-  const persistGithub = async () => {
-    await setSetting(GITHUB_AUTHOR_KEY, githubAuthor.trim());
-    await setSetting(GITHUB_API_URL_KEY, githubApiUrl.trim());
-    await setSetting(GITHUB_OWNERS_KEY, JSON.stringify(githubOwners));
-    await setGithubToken(githubToken.trim());
-  };
-
-  const saveGithub = async () => {
-    await persistGithub();
-    await setSetting(GITHUB_ENABLED_KEY, githubEnabled ? "1" : "0");
-    setGithubSaved(true);
-    window.setTimeout(() => setGithubSaved(false), 1500);
-  };
-
-  const testGithub = async () => {
-    setGithubTesting(true);
-    setGithubTestResult("");
-    // 後端從 settings/keychain 讀設定，測試需先暫存目前輸入值；測完還原原值，避免「測試＝偷偷存檔」
-    const orig = await Promise.all(
-      [GITHUB_AUTHOR_KEY, GITHUB_API_URL_KEY, GITHUB_OWNERS_KEY].map(
-        async (k) => [k, await getSetting(k)] as const,
-      ),
-    );
-    const origToken = await getGithubToken();
-    try {
-      await persistGithub();
-      const count = await githubTestConnection();
-      setGithubTestResult(`✅ 連線成功，找到 ${count} 個 repo`);
-    } catch (e) {
-      setGithubTestResult(`❌ ${e}`);
-    } finally {
-      for (const [k, v] of orig) {
-        if (v !== null) await setSetting(k, v);
-      }
-      // 只在原本就有 token 時還原；否則保留剛輸入的值，
-      // 避免第一次設定（原本為空）時把剛填的 token 洗掉
-      if (origToken) await setGithubToken(origToken);
-      setGithubTesting(false);
-    }
-  };
-
-  // 把目前畫面上的 Azure DevOps 設定寫回 DB（測試與儲存共用；enabled 只在儲存時寫）；PAT 走 keychain
-  const persistAzure = async () => {
-    await setSetting(AZURE_BASE_URL_KEY, azureBaseUrl.trim());
-    await setSetting(AZURE_COLLECTIONS_KEY, JSON.stringify(azureCollections));
-    await setSetting(AZURE_AUTHOR_KEY, azureAuthor.trim());
-    await setAzurePat(azurePat.trim());
-  };
-
-  const saveAzure = async () => {
-    await persistAzure();
-    await setSetting(AZURE_ENABLED_KEY, azureEnabled ? "1" : "0");
-    setAzureSaved(true);
-    window.setTimeout(() => setAzureSaved(false), 1500);
-  };
-
-  const testAzure = async () => {
-    setAzureTesting(true);
-    setAzureTestResult("");
-    // 同 GitHub：暫存→測試→還原，避免「測試＝偷偷存檔」
-    const orig = await Promise.all(
-      [AZURE_BASE_URL_KEY, AZURE_COLLECTIONS_KEY, AZURE_AUTHOR_KEY].map(
-        async (k) => [k, await getSetting(k)] as const,
-      ),
-    );
-    const origPat = await getAzurePat();
-    try {
-      await persistAzure();
-      const count = await azureTestConnection();
-      setAzureTestResult(`✅ 連線成功，找到 ${count} 個 repo`);
-    } catch (e) {
-      setAzureTestResult(`❌ ${e}`);
-    } finally {
-      for (const [k, v] of orig) {
-        if (v !== null) await setSetting(k, v);
-      }
-      if (origPat) await setAzurePat(origPat);
-      setAzureTesting(false);
-    }
-  };
 
   // 逾時欄位驗證：5–3600 的整數才合法；空字串視為重設回預設 120
   const parseTimeout = (v: string): number | null => {
@@ -457,246 +356,40 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
       <section className="mt-6 rounded-lg border border-slate-200 p-5 dark:border-slate-700">
         <h3 className="mb-1 font-semibold text-slate-800 dark:text-slate-100">儲存庫整合</h3>
         <p className="mb-4 text-sm text-slate-500 dark:text-slate-400 dark:text-slate-500">
-          設定後，可在日報用「從 Git 草擬」一鍵把當天的 commit 轉成日報草稿。可同時啟用多個來源
-          （例如公司 Azure DevOps + 個人 GitHub），撈取時會合併所有已啟用來源；啟用開關按各來源的「儲存」後生效。
+          設定後，可在日報用「從 Git 草擬」一鍵把當天的 commit 轉成日報草稿。可新增多個來源
+          （每筆選 GitHub 或 Azure DevOps，各自獨立設定與 token），撈取時會合併所有「已啟用」的來源。
         </p>
 
-        <div className="mb-4 rounded-md border border-slate-200 p-4 dark:border-slate-700">
-          <div className="mb-3 flex items-center justify-between">
-            <h4 className="font-medium text-slate-800 dark:text-slate-100">GitHub</h4>
-            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-              <input
-                type="checkbox"
-                checked={githubEnabled}
-                onChange={(e) => setGithubEnabled(e.target.checked)}
-                className="h-4 w-4 accent-accent-600"
-              />
-              啟用
-            </label>
-          </div>
+        {providers.length === 0 && (
+          <p className="mb-4 text-sm text-slate-400 dark:text-slate-500">尚未新增任何來源，請於下方選擇類型後新增。</p>
+        )}
 
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">GitHub API 位址</label>
-          <input
-            value={githubApiUrl}
-            onChange={(e) => setGithubApiUrl(e.target.value)}
-            placeholder="https://api.github.com"
-            className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
+        {providers.map((p) => (
+          <RepoProviderCard
+            key={p.id}
+            provider={p}
+            initialSecret={providerSecrets[p.id] ?? ""}
+            defaultExpanded={newlyAdded.has(p.id)}
+            onSave={saveProvider}
+            onRemove={() => removeProvider(p.id)}
           />
-          <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-            留空＝雲端 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">https://api.github.com</code>；企業版填 API 位址，例如 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">https://ghe.company.com/api/v3</code>。
-          </p>
+        ))}
 
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
-            Personal Access Token（需 repo 讀取權限）
-          </label>
-          <input
-            type="password"
-            value={githubToken}
-            onChange={(e) => setGithubTokenValue(e.target.value)}
-            placeholder="貼上 token"
-            className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-            token 存在系統的憑證管理員（keychain；系統不支援時退回本機資料庫），不會包含在「匯出全部資料」的備份檔中。
-          </p>
-
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">作者關鍵字（逗號分隔，留空＝全部）</label>
-          <input
-            value={githubAuthor}
-            onChange={(e) => setGithubAuthor(e.target.value)}
-            placeholder="例如 arieschao（不分大小寫，包含比對）"
-            className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-            以「包含、不分大小寫」比對 commit 的 GitHub 帳號（login）、作者姓名與 email，任一命中即算。多個關鍵字可用逗號分隔。
-          </p>
-
-          <div className="mb-1 flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Owner（org 或使用者）</label>
-          </div>
-          <div className="mb-2 flex gap-2">
-            <input
-              value={newOwner}
-              onChange={(e) => setNewOwner(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addOwner();
-                }
-              }}
-              placeholder="輸入 org 或使用者名稱，例如 my-org"
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-            />
-            <button
-              onClick={addOwner}
-              className="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
-            >
-              + 新增
-            </button>
-          </div>
-          {githubOwners.length === 0 ? (
-            <p className="mb-3 text-sm text-slate-400 dark:text-slate-500">尚未新增任何 owner</p>
-          ) : (
-            <ul className="mb-3 space-y-1">
-              {githubOwners.map((o) => (
-                <li
-                  key={o}
-                  className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800"
-                >
-                  <span className="truncate font-mono text-slate-700 dark:text-slate-200" title={o}>
-                    {o}
-                  </span>
-                  <button
-                    onClick={() => removeOwner(o)}
-                    className="ml-2 shrink-0 text-xs text-rose-500 hover:underline dark:text-rose-400"
-                  >
-                    移除
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={saveGithub}
-              className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
-            >
-              儲存
-            </button>
-            <button
-              onClick={testGithub}
-              disabled={githubTesting}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
-            >
-              {githubTesting ? "測試中…" : "測試連線"}
-            </button>
-            {githubSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">已儲存</span>}
-          </div>
-          {githubTestResult && (
-            <pre className="mt-3 whitespace-pre-wrap rounded-md bg-slate-50 p-3 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200">
-              {githubTestResult}
-            </pre>
-          )}
-        </div>
-
-        <div className="rounded-md border border-slate-200 p-4 dark:border-slate-700">
-          <div className="mb-3 flex items-center justify-between">
-            <h4 className="font-medium text-slate-800 dark:text-slate-100">Azure DevOps（含 TFS / ADS）</h4>
-            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-              <input
-                type="checkbox"
-                checked={azureEnabled}
-                onChange={(e) => setAzureEnabled(e.target.checked)}
-                className="h-4 w-4 accent-accent-600"
-              />
-              啟用
-            </label>
-          </div>
-
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">伺服器位址</label>
-          <input
-            value={azureBaseUrl}
-            onChange={(e) => setAzureBaseUrl(e.target.value)}
-            placeholder="例如 http://tfs.company.com:8080/tfs 或 https://dev.azure.com"
-            className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-            填到 collection「之前」的位址：企業內 TFS/ADS 例如 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">http://tfs.example.com:8080/tfs</code>；雲端填 <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">https://dev.azure.com</code>（collection 填組織名）。
-          </p>
-
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
-            Personal Access Token（需 Code 讀取權限）
-          </label>
-          <input
-            type="password"
-            value={azurePat}
-            onChange={(e) => setAzurePatValue(e.target.value)}
-            placeholder="貼上 PAT"
-            className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-            PAT 存在系統的憑證管理員（keychain；系統不支援時退回本機資料庫），不會包含在「匯出全部資料」的備份檔中。
-          </p>
-
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">作者關鍵字（逗號分隔，留空＝全部）</label>
-          <input
-            value={azureAuthor}
-            onChange={(e) => setAzureAuthor(e.target.value)}
-            placeholder="例如 arieschao（不分大小寫，包含比對）"
-            className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-          />
-          <p className="mb-4 text-xs text-slate-400 dark:text-slate-500">
-            以「包含、不分大小寫」比對 commit 的作者姓名。多個關鍵字可用逗號分隔。
-          </p>
-
-          <div className="mb-1 flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Collection（雲端為組織名）</label>
-          </div>
-          <div className="mb-2 flex gap-2">
-            <input
-              value={newCollection}
-              onChange={(e) => setNewCollection(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addCollection();
-                }
-              }}
-              placeholder="輸入 collection 名稱，例如 DefaultCollection"
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800"
-            />
-            <button
-              onClick={addCollection}
-              className="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
-            >
-              + 新增
-            </button>
-          </div>
-          {azureCollections.length === 0 ? (
-            <p className="mb-3 text-sm text-slate-400 dark:text-slate-500">尚未新增任何 collection</p>
-          ) : (
-            <ul className="mb-3 space-y-1">
-              {azureCollections.map((c) => (
-                <li
-                  key={c}
-                  className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800"
-                >
-                  <span className="truncate font-mono text-slate-700 dark:text-slate-200" title={c}>
-                    {c}
-                  </span>
-                  <button
-                    onClick={() => removeCollection(c)}
-                    className="ml-2 shrink-0 text-xs text-rose-500 hover:underline dark:text-rose-400"
-                  >
-                    移除
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={saveAzure}
-              className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
-            >
-              儲存
-            </button>
-            <button
-              onClick={testAzure}
-              disabled={azureTesting}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
-            >
-              {azureTesting ? "測試中…" : "測試連線"}
-            </button>
-            {azureSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">已儲存</span>}
-          </div>
-          {azureTestResult && (
-            <pre className="mt-3 whitespace-pre-wrap rounded-md bg-slate-50 p-3 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200">
-              {azureTestResult}
-            </pre>
-          )}
+        <div className="mt-2 flex items-center gap-2">
+          <select
+            value={newProviderType}
+            onChange={(e) => setNewProviderType(e.target.value as RepoProvider["type"])}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <option value="github">GitHub</option>
+            <option value="azure">Azure DevOps（含 TFS / ADS）</option>
+          </select>
+          <button
+            onClick={addProvider}
+            className="rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
+          >
+            + 新增來源
+          </button>
         </div>
       </section>
 
