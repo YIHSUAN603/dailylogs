@@ -2,6 +2,17 @@
 
 本檔案記錄本專案各版本的重要變更，格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
 
+## [2.9.0] - 2026-07-20
+
+### 新增
+
+- **日報改用所見即所得編輯器**：編輯器由 Markdown 換成 TipTap 富文本（內容改以 HTML 儲存），支援粗體／標題／清單／表格，以及貼上、拖放圖片內嵌；匯出新增「複製（可貼 Google Docs，含格式與圖片）」，存 HTML、Word、PDF 皆保留圖片。開啟舊日報時自動把 Markdown／categories 資料惰性轉為 HTML，全文搜尋會去除 HTML 標籤與 base64 再比對，匯入亦相容各世代舊備份 JSON。
+- **儲存庫整合可新增多個來源**：GitHub 與 Azure DevOps 由寫死的單例改為可任意新增多筆的來源清單（同型別也可多筆，例如公司＋個人 GitHub），各來源可獨立啟用與測試連線；「從 Git 草擬」會合併所有已啟用來源。每筆來源的 token/PAT 各自存 OS keychain、不隨備份匯出。
+
+### 變更
+
+- **舊資料自動遷移**：更新後首次啟動會偵測舊 identifier（`com.richitech.dailylogs`）資料庫並非破壞性合併（只補缺的日期／設定，旗標確保只跑一次）；舊版 `github_*`／`azure_*` 整合設定與明文 token/PAT 也會一次性遷移為兩筆來源。
+
 ## [2.8.1] - 2026-07-20
 
 ### 修正
