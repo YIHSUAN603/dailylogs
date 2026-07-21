@@ -76,14 +76,14 @@ export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
 }
 
-/** 讀取 GitHub token（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
-export function getGithubToken(): Promise<string> {
-  return invoke("get_github_token");
+/** 讀取某來源（provider id）的 token/PAT（OS keychain 優先，退回 settings 表），沒有時回傳空字串 */
+export function getProviderSecret(id: string): Promise<string> {
+  return invoke("get_provider_secret", { id });
 }
 
-/** 寫入 GitHub token（OS keychain 優先，退回 settings 表） */
-export function setGithubToken(value: string): Promise<void> {
-  return invoke("set_github_token", { value });
+/** 寫入某來源（provider id）的 token/PAT（空字串＝刪除；OS keychain 優先，退回 settings 表） */
+export function setProviderSecret(id: string, value: string): Promise<void> {
+  return invoke("set_provider_secret", { id, value });
 }
 
 /** 取得某日標籤 */
@@ -101,24 +101,51 @@ export function runAi(prompt: string): Promise<string> {
   return invoke("run_ai", { prompt });
 }
 
-/** 從 GitHub 取得某日該作者的 commit（組好的文字） */
-export function githubCollectCommits(date: string): Promise<string> {
-  return invoke("github_collect_commits", { date });
+/** 統一撈 commit 的結果：text 為組好的文字，warnings 為個別提供者的失敗訊息 */
+export interface CollectedCommits {
+  text: string;
+  warnings: string[];
 }
 
-/** 測試 GitHub 連線，回傳所有 owner 的 repo 總數 */
-export function githubTestConnection(): Promise<number> {
-  return invoke("github_test_connection");
+/** 從所有已啟用的儲存庫整合取得某日該作者的 commit（合併組好的文字；單一提供者失敗記入 warnings） */
+export function collectCommits(date: string): Promise<CollectedCommits> {
+  return invoke("repo_collect_commits", { date });
 }
 
-/** 列出所有 owner 的 repo 名稱（給工作面板匯入專案用） */
-export function githubListRepos(): Promise<string[]> {
-  return invoke("github_list_repos");
+/** 一筆儲存庫來源（GitHub 或 Azure DevOps）；token/PAT 另走 getProviderSecret/setProviderSecret */
+export interface RepoProvider {
+  id: string;
+  type: "github" | "azure";
+  name: string;
+  enabled: boolean;
+  /** 作者比對關鍵字（逗號分隔，包含比對） */
+  author: string;
+  // type === "github"
+  apiUrl?: string; // 空＝https://api.github.com
+  owners?: string[];
+  // type === "azure"
+  baseUrl?: string;
+  collections?: string[];
+}
+
+/** 測試單一來源連線（直接吃傳入的設定與秘密，無存檔副作用），回傳 repo 總數 */
+export function repoTestConnection(provider: RepoProvider, secret: string): Promise<number> {
+  return invoke("repo_test_connection", { provider, secret });
+}
+
+/** 列出所有已啟用整合的專案/儲存庫名稱（GitHub repo ∪ Azure 團隊專案，給工作面板匯入用） */
+export function listRepoProjects(): Promise<string[]> {
+  return invoke("repo_list_projects");
 }
 
 /** 讀取文字檔（路徑由前端的開檔對話框取得，給匯入用） */
 export function readTextFile(path: string): Promise<string> {
   return invoke("read_text_file", { path });
+}
+
+/** 讀取二進位檔（給前端解析 PDF 等） */
+export async function readBinaryFile(path: string): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("read_binary_file", { path }));
 }
 
 /** 匯出整個資料庫成 JSON 字串 */
@@ -135,9 +162,8 @@ export function importAll(json: string): Promise<number> {
 export const AI_COMMAND_KEY = "ai_command";
 export const AI_TIMEOUT_KEY = "ai_timeout_secs"; // AI 逾時秒數（正整數字串；須與 commands.rs 的 AI_TIMEOUT_KEY 一致）
 export const REPORT_TEMPLATE_KEY = "report_template"; // 新建日報時預填的 Markdown 範本
-export const GITHUB_API_URL_KEY = "github_api_url"; // GitHub REST API 位址（空＝預設 api.github.com）
-export const GITHUB_OWNERS_KEY = "github_owners"; // owner（org 或使用者）JSON 字串陣列
-export const GITHUB_AUTHOR_KEY = "github_author"; // 作者比對關鍵字（逗號分隔，包含比對 login/name/email）
-export const GITHUB_REPOS_KEY = "github_repos"; // 匯入的 GitHub repo 名稱（JSON 陣列）
+export const REPO_PROVIDERS_KEY = "repo_providers"; // 儲存庫來源清單（RepoProvider[] JSON 字串）
+export const REPO_PROJECTS_KEY = "repo_projects"; // 匯入的專案/儲存庫名稱（JSON 陣列）
+export const LEGACY_GITHUB_REPOS_KEY = "github_repos"; // 舊版匯入清單 key（僅供讀取 fallback）
 export const THEME_ACCENT_KEY = "theme_accent"; // 主色名稱（AccentName）
 export const THEME_MODE_KEY = "theme_mode"; // 淺/深色模式（light | dark | system）

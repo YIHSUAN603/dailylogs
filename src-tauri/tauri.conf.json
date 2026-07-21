@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "日報告 DailyLogs",
-  "version": "2.4.0",
-  "identifier": "com.richitech.dailylogs",
+  "productName": "DailyLogs",
+  "version": "2.9.0",
+  "identifier": "com.arieschao.dailylogs",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1421",
@@ -14,16 +14,26 @@
       {
         "title": "日報告 DailyLogs",
         "width": 1100,
-        "height": 760
+        "height": 760,
+        "dragDropEnabled": false
       }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxMjc3NDFEMDI1NzM3QzcKUldUSE4xY0NIWFFuVVJiWUUxVGt1ZjV4TUVrUHJPMFdKZ3cySEFlTVA1N3NlMFNvVlJWdUIxZzkK",
+      "endpoints": [
+        "https://github.com/YIHSUAN603/dailylogs/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

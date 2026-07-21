@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { Calendar, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import type { ReportMeta, SearchHit } from "../types";
 import { todayStr } from "../lib/format";
@@ -162,6 +163,10 @@ export default function Sidebar({
 }: Props) {
   const searching = search.trim().length > 0;
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {}); // 純瀏覽器 dev 模式無 Tauri API，拿不到就不顯示
+  }, []);
   const pickerRef = useRef<HTMLDivElement>(null);
   const activeDate = selectedDate || todayStr();
   const reportDates = useMemo(() => {
@@ -318,6 +323,11 @@ export default function Sidebar({
       >
         ⚙ 設定
       </button>
+      {appVersion && (
+        <p className="border-t border-slate-200 px-4 py-2 text-center text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
+          v{appVersion}
+        </p>
+      )}
     </aside>
   );
 }

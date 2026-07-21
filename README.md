@@ -2,22 +2,18 @@
 
 撰寫工作日報的桌面應用程式。核心目標：降低「每天回想做了什麼 + 排版打字」的成本，並能一鍵產出可寄送/貼上的格式化日報。
 
-![主畫面](docs/images/01-main-window.png)
-
 ## 功能
 
 - **自由 Markdown 日報**：一天一份，內容即一段 Markdown，並排即時預覽，可自由用標題／清單／表格；停筆約 0.6 秒自動存草稿，可標記完成
-- **AI 協助**：零散記事 → 正式日報、潤稿、自動下標籤、日報彙整成週／月報、AI 拆解工作項目（呼叫本機可設定的 CLI，預設 `claude -p`，也可用 `codex exec` 等；prompt 經 stdin 傳入，不經 shell）
-- **工作面板**：以清單／月曆兩種檢視追蹤待辦工作項目，可由 AI 從描述拆解出工項
-- **TFS 整合**：經 Azure DevOps REST API 抓指定 collection／作者當天的 commit，草擬進日報（PAT 只存本機）
+- **AI 協助**：零散記事 → 正式日報、潤稿、自動下標籤、日報彙整成週／月報、AI 依敏捷模板拆解工作項目（呼叫本機可設定的 CLI，預設 `claude -p`，也可用 `codex exec` 等；不經 shell，Unix 經 stdin、Windows 以參數傳入）
+- **工作面板**：以清單／看板／月曆三種檢視追蹤待辦工作項目，可由 AI 從描述或 `.md` / `.txt` / `.pdf` 檔拆解出工項
+- **儲存庫整合**：GitHub 與 Azure DevOps（含企業內 TFS/ADS）可同時啟用，抓指定 owner／collection／作者當天的 commit 合併草擬進日報（token/PAT 存 OS keychain）
 - **輸出**：複製純文字、複製 Markdown、存 .md、存 Word、列印 / PDF
 - **本機儲存與備份**：資料存 SQLite，全部資料可匯出／匯入 JSON（PAT 不含在備份內）
 
-![工作面板](docs/images/06-tasks-list.png)
-
 ## 文件
 
-- [使用說明書](docs/使用說明書.md)：完整操作說明與截圖
+- [使用說明書](docs/使用說明書.md)：完整操作說明
 - [安裝與使用指南](docs/安裝與使用指南.md)：Windows 安裝面向
 - [CI/CD 建置流程](docs/CI-CD建置流程.md)：Azure Pipeline 自動建置
 
@@ -98,8 +94,11 @@ src/                  前端（React）
 src-tauri/src/
   db.rs               SQLite 結構與 CRUD
   commands.rs         #[tauri::command] 對前端的 API
-  ai.rs               執行外部 AI CLI（prompt 經 stdin）
-  tfs.rs              Azure DevOps REST API 取 commit
+  ai.rs               執行外部 AI CLI（Unix 經 stdin、Windows 以參數傳 prompt）
+  repo.rs             儲存庫整合共用層（RepoCommits / format_commits）
+  github.rs           GitHub REST API 取 commit
+  azure.rs            Azure DevOps（含 TFS）REST API 取 commit
+  secret.rs           token/PAT 的 keychain 儲存
   lib.rs              app 進入點、DB 初始化
 ```
 

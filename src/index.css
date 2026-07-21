@@ -42,6 +42,35 @@ body,
   margin: 0;
 }
 
+/* 捲軸跟隨主題：淺色用 slate-300/400、深色用 slate-600/500，軌道透明。
+   只用 ::-webkit-scrollbar（WebKitGTK 與 WebView2 皆支援）；
+   勿加 scrollbar-color——Chromium 引擎一旦設定它會停用 webkit 捲軸樣式。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1; /* slate-300 */
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8; /* slate-400 */
+}
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #475569; /* slate-600 */
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b; /* slate-500 */
+}
+
 /* Tailwind Preflight 會把 ul/ol 的 list-style 清成 none，
    而 react-md-editor 預覽的最上層清單未自帶 list-style-type，
    會跟著消失。在此補回最上層的項目符號 / 編號。 */

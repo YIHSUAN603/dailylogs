@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
-import MDEditor from "@uiw/react-md-editor";
-import "@uiw/react-md-editor/markdown-editor.css";
+import RichEditor from "./RichEditor";
 import type { Report, Task } from "../types";
-import { reportToEditableText, dedupeCommits } from "../lib/format";
+import { reportToEditableText, dedupeCommitsHtml } from "../lib/format";
+import { markdownToHtml, looksLikeHtml } from "../lib/html";
 import { extractCarryover } from "../lib/carryover";
 import * as exporter from "../lib/export";
 import * as ai from "../lib/ai";
@@ -37,10 +37,14 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
     fn();
   };
 
-  // 舊資料相容：raw_notes 空但有 categories 時，把結構化內容轉成 Markdown 一次性遷移
+  // 舊資料相容（切日觸發一次）：
+  // 1) raw_notes 空但有 categories → 結構化內容轉 HTML
+  // 2) raw_notes 是舊 Markdown（非 HTML）→ 轉成 HTML
   useEffect(() => {
     if (!report.raw_notes.trim() && report.categories.length > 0) {
-      onChange({ raw_notes: reportToEditableText(report) });
+      onChange({ raw_notes: markdownToHtml(reportToEditableText(report)) });
+    } else if (report.raw_notes.trim() && !looksLikeHtml(report.raw_notes)) {
+      onChange({ raw_notes: markdownToHtml(report.raw_notes) });
     }
     // 僅在切換日報時觸發一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -63,8 +67,9 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
       if (!prev) throw new Error("找不到更早的日報");
       const prevReport = await api.getReport(prev.date);
       if (!prevReport) throw new Error("讀取前一份日報失敗");
-      // 舊資料相容：raw_notes 空但有 categories 時轉成 Markdown 再擷取
-      const source = prevReport.raw_notes.trim() ? prevReport.raw_notes : reportToEditableText(prevReport);
+      // 來源統一成 HTML：raw_notes 空但有 categories → 由結構化內容轉；舊 Markdown → 轉 HTML
+      const rawSource = prevReport.raw_notes.trim() ? prevReport.raw_notes : reportToEditableText(prevReport);
+      const source = looksLikeHtml(rawSource) ? rawSource : markdownToHtml(rawSource);
       let extracted = extractCarryover(source);
       if (extracted === null) {
         const ok = await ask(`${prev.date} 的日報找不到「進行中／明日／待辦」段落，要帶入整份內容嗎？`, {
@@ -75,10 +80,10 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
         extracted = source.trim();
       }
       if (!extracted) throw new Error(`${prev.date} 的日報沒有可帶入的內容`);
-      const existing = report.raw_notes.trimEnd();
+      const existing = report.raw_notes.trim();
       if (existing.includes(extracted)) throw new Error("內容已帶入過");
-      const block = `## 承上日（${prev.date}）\n\n${extracted}`;
-      applyIfCurrent(() => onChange({ raw_notes: existing ? `${existing}\n\n${block}` : block }));
+      const block = `<h2>承上日（${prev.date}）</h2>${extracted}`;
+      applyIfCurrent(() => onChange({ raw_notes: existing ? `${existing}${block}` : block }));
       toast(`已帶入 ${prev.date} 的未完事項`);
     } catch (e) {
       toastError(`帶入昨日失敗：${e}`);
@@ -174,16 +179,18 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
           accent
           disabled={!!aiBusy}
           onClick={runAi("從 Git 草擬", async () => {
-            const commits = await api.githubCollectCommits(report.date);
+            const { text: commits, warnings } = await api.collectCommits(report.date);
+            // 部分提供者失敗（例如在家連不到公司 TFS）：提示但不中斷另一邊的結果
+            warnings.forEach((w) => toastError(`部分來源失敗：${w}`));
             if (!commits) throw new Error("今天沒有符合的 commit");
-            const existing = report.raw_notes.trimEnd();
+            const existing = report.raw_notes.trim();
             if (!existing) {
-              applyIfCurrent(() => onChange({ raw_notes: commits }));
+              applyIfCurrent(() => onChange({ raw_notes: markdownToHtml(commits) }));
               return;
             }
-            const fresh = dedupeCommits(existing, commits);
-            if (!fresh) throw new Error("沒有新的 commit（都已加入）");
-            applyIfCurrent(() => onChange({ raw_notes: `${existing}\n\n${fresh}` }));
+            const freshHtml = dedupeCommitsHtml(existing, commits);
+            if (!freshHtml) throw new Error("沒有新的 commit（都已加入）");
+            applyIfCurrent(() => onChange({ raw_notes: `${existing}${freshHtml}` }));
           })}
         >
           從 Git 草擬
@@ -191,9 +198,9 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
         <ToolBtn onClick={carryYesterday}>帶入昨日</ToolBtn>
 
         <span className="ml-3 text-xs text-slate-400 dark:text-slate-500">輸出：</span>
+        <ToolBtn onClick={run(() => exporter.copyRich(report), "已複製（含格式，可貼進 Google Docs）")}>複製（可貼 Google Docs）</ToolBtn>
         <ToolBtn onClick={run(() => exporter.copyPlainText(report), "已複製純文字")}>複製文字</ToolBtn>
-        <ToolBtn onClick={run(() => exporter.copyMarkdown(report), "已複製 Markdown")}>複製 MD</ToolBtn>
-        <ToolBtn onClick={run(() => exporter.exportMarkdown(report), "已匯出 Markdown")}>存 .md</ToolBtn>
+        <ToolBtn onClick={run(() => exporter.exportHtml(report), "已匯出 HTML")}>存 HTML</ToolBtn>
         <ToolBtn onClick={run(() => exporter.exportDocx(report), "已匯出 Word")}>存 Word</ToolBtn>
         <ToolBtn onClick={run(() => exporter.exportPdf(report), "已開啟列印")}>列印 / PDF</ToolBtn>
 
@@ -214,18 +221,13 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
         </div>
       )}
 
-      {/* 內容區：Markdown 編輯器（工具列 + 並排即時預覽） */}
-      <div className="flex-1 overflow-hidden px-6 py-4" data-color-mode={dark ? "dark" : "light"}>
-        <MDEditor
+      {/* 內容區：所見即所得富文本編輯器（可貼圖片） */}
+      <div className="flex-1 overflow-hidden px-6 py-4">
+        <RichEditor
           value={report.raw_notes}
-          onChange={(v) => onChange({ raw_notes: v ?? "" })}
-          height="100%"
-          preview="live"
-          visibleDragbar={false}
-          textareaProps={{
-            placeholder:
-              "直接用 Markdown 寫今天做了什麼、遇到什麼問題、明天要做什麼…\n可自由使用標題、清單、表格等語法；右側即時預覽。",
-          }}
+          onChange={(html) => onChange({ raw_notes: html })}
+          dark={dark}
+          placeholder="寫今天做了什麼、遇到什麼問題、明天要做什麼…可用標題、清單、表格，並直接貼上或拖入截圖。"
         />
       </div>
     </div>

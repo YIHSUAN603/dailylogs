@@ -46,19 +46,28 @@ DB 連線是單一 `Connection` 包在 `Mutex` 裡，於 `lib.rs` 的 `setup` �
 
 ### AI 整合（呼叫外部 CLI）
 
-不直接呼叫 API，而是執行使用者設定的本機 CLI（預設 `claude -p`，存在 settings 表 key `ai_command`）。`src-tauri/src/ai.rs` 把命令字串以空白切成「程式 + 參數」（不經 shell，避免注入），prompt 經 **stdin** 傳入、讀 stdout。`run_ai` command 為 `async`，讓阻塞子行程跑在 Tauri 執行緒池不卡 UI。
+不直接呼叫 API，而是執行使用者設定的本機 CLI（預設 `claude -p`，存在 settings 表 key `ai_command`）。`src-tauri/src/ai.rs` 把命令字串以空白切成「程式 + 參數」（不經 shell，避免注入），讀 stdout；prompt 的傳遞依平台：Unix 經 **stdin**，Windows 因常見 CLI 讀 piped stdin 不可靠，改**附加為最後一個命令列參數**（stdin 給 null，命令勿以 `-` 結尾，並有 30000 UTF-16 字元長度上限保護）。`run_ai` command 為 `async`，讓阻塞子行程跑在 Tauri 執行緒池不卡 UI。
 
 prompt 工程全在前端 `src/lib/ai.ts`：`organizeReport`（零散記事→日報）、`polishReport`（潤稿）、`summarizeRange`（彙整週/月報）、`generateTags`。`organizeReport`/`polishReport` 共用 `FORMAT_RULE` 建議 AI 輸出 `# 專案 / ## 子分類 / ### 面向 / - 條列` 的排版，但**直接回傳 Markdown 文字**寫回 `raw_notes`（使用者可再自由編輯），不再解析成結構。`summarizeRange`/`generateTags` 也直接吃 `raw_notes`。
 
 （舊版的 `parseCategories()` 解析、`draftFromCommits` 已移除；現在 FORMAT_RULE 只是排版建議，沒有「解析回 Category」的綁定契約。）
 
-### GitHub 整合
+### 儲存庫整合（可新增多個來源：GitHub / Azure DevOps）
 
-`src-tauri/src/github.rs`：走 GitHub REST API（Bearer token + `User-Agent`/`Accept`/`X-GitHub-Api-Version: 2022-11-28` header），位址可設定（預設 `https://api.github.com`，填企業版 `.../api/v3` 即支援 GHES）。以「owner（org 或使用者）」為單位列 repo：先試 `GET /orgs/{owner}/repos`、404 退 `GET /users/{owner}/repos`，皆含分頁（`per_page=100` 迴圈 page）。`collect_commits` 掃所有 owner 的 repo（`GET /repos/{owner}/{repo}/commits?since&until`），取指定日期（本機時區，查詢窗放寬 ±1 天避開時區邊界）該作者的 commit 訊息首行，單一 owner/repo 失敗會跳過不中斷，併發上限 10。作者比對是「逗號分隔關鍵字、不分大小寫包含」，比對 commit 的 `author.name`／`author.email`／GitHub `login` 三者任一。設定存 settings 表：`github_api_url`、`github_owners`（JSON 陣列）、`github_author`；token 見下方設定儲存。跨 owner 同名 repo 顯示成 `owner/repo`；輸出文字格式為 `# owner / [repo] / - 標題`（`format_commits`）。
+**資料模型**：一份**來源清單**存 settings key `repo_providers`（JSON 陣列），每筆是一個 `RepoProvider`（`commands.rs` 定義 Rust 結構、`api.ts` 定義同名 TS 型別，欄位 camelCase）：`{ id, type: "github"|"azure", name, enabled, author, apiUrl?, owners?, baseUrl?, collections? }`。使用者可任意新增多筆（同型別也可多筆，例如公司 GitHub + 個人 GitHub）。token/PAT **不在此結構內**（要排除備份），另走 secret（見下）。
+
+三個模組分工：`src-tauri/src/repo.rs` 是共用層（`RepoCommits` 結構 + `format_commits()` 組文字，格式 `# 群組 / [repo] / - 標題`）；`github.rs` 與 `azure.rs` 是各自的 provider，皆輸出 `Vec<RepoCommits>`，各自的 `GithubConfig`/`AzureConfig` 仍是「一組設定」。`commands.rs` 的 `repo_collect_commits(date)` / `repo_list_projects()` 會讀 `repo_providers`、對每筆 **enabled** 者組 config（讀該筆 secret）後各自撈取，合併排序再格式化——單一來源失敗記入 `warnings`（前端 toast 提示，前綴用該來源 `name`）不中斷，全部失敗才回 Err，沒有任何來源啟用也回 Err。測試連線走 `repo_test_connection(provider, secret)`：**直接吃前端傳入的設定與秘密**（不讀 settings、無存檔副作用），依 `type` 組 config 後回 repo 數。
+
+- **GitHub**（`github.rs`）：GitHub REST API（Bearer token + `User-Agent`/`Accept`/`X-GitHub-Api-Version: 2022-11-28` header），位址可設定（預設 `https://api.github.com`，填企業版 `.../api/v3` 即支援 GHES）。以「owner（org 或使用者）」為單位列 repo：先試 `GET /orgs/{owner}/repos`、404 退 `GET /users/{owner}/repos`，皆含分頁（`per_page=100` 迴圈 page）。作者比對 commit 的 `author.name`／`author.email`／GitHub `login` 三者任一。對應 `RepoProvider` 欄位：`apiUrl`、`owners`、`author`。
+- **Azure DevOps**（`azure.rs`）：走 `{base}/{collection}/_apis/git/...` REST API（PAT 走 basic auth、api-version 3.0，相容舊 TFS；雲端填 `https://dev.azure.com` + collection=組織名）。以 collection 為單位列 repo 與團隊專案；作者只比對 `author.name`。對應欄位：`baseUrl`、`collections`、`author`。
+
+兩個 provider 共通行為：`collect_commits` 取指定日期（本機時區，查詢窗放寬 ±1 天避開時區邊界）該作者的 commit 訊息首行，單一 repo 失敗跳過不中斷，併發上限 10；作者比對是「逗號分隔關鍵字、不分大小寫包含」；跨群組同名 repo 顯示成 `群組/repo`。token/PAT 見下方設定儲存。
+
+**舊版遷移**：早期是「寫死的兩個單例」（settings key `github_*`/`azure_*` + keychain 帳號 `github_token`/`azure_pat` + 成對的 `github_test_connection`/`azure_test_connection`）。`commands::migrate_repo_providers`（`lib.rs` setup 內一次性、best-effort 呼叫）把舊 key 轉成 `repo_providers` 兩筆（id 固定 `migrated-github`/`migrated-azure`，沿用舊 enabled 判定），並把舊 token/PAT 搬到 per-instance secret；`repo_providers` 已存在則跳過（沒有舊資料也寫入 `[]` 代表已遷移）。前端已無舊 UI；`github_*`/`azure_*` 舊設定 key 留著無妨（程式不再讀）。
 
 ### 設定儲存
 
-一般設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。**例外：GitHub token** 走 `src-tauri/src/secret.rs`（`get_github_token`/`set_github_token` command）——優先存 OS keychain（Windows 憑證管理員 / Linux Secret Service），keychain 不可用（如 WSL）則退回 settings 表，讀取時會自動把舊明文搬進 keychain；匯出備份一律排除 token。
+一般設定走 SQLite `settings` 表（key-value），透過 `get_setting`/`set_setting` 存取。key 常數在 `commands.rs`（Rust 端）與 `api.ts`（前端）各定義一份，需保持一致。**例外：來源的 token/PAT** 走 `src-tauri/src/secret.rs`：每筆來源一組秘密，透過 `get_provider_secret(id)`/`set_provider_secret(id, value)` command（委派 `secret::get_provider`/`set_provider`，keychain 帳號 `provider_{id}`、退回 settings 表 key `provider_secret_{id}`）——優先存 OS keychain（macOS 鑰匙圈 / Windows 憑證管理員 / Linux Secret Service），keychain 不可用（如 WSL）則退回 settings 表。匯出備份一律排除秘密：`db.rs` 的 `all_settings()` 排除 `github_token`/`azure_pat`/舊版 `tfs_pat` 明文，並以 `NOT LIKE 'provider_secret_%'` 排除 per-instance 秘密。（`secret.rs` 仍保留 `GITHUB_TOKEN`/`AZURE_PAT` 兩個 `SecretKind` 常數與 `get`，僅供遷移讀舊值。）
 
 ### 前端結構與狀態
 

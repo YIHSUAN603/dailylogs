@@ -2,6 +2,51 @@
 
 本檔案記錄本專案各版本的重要變更，格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
 
+## [2.9.0] - 2026-07-20
+
+### 新增
+
+- **日報改用所見即所得編輯器**：編輯器由 Markdown 換成 TipTap 富文本（內容改以 HTML 儲存），支援粗體／標題／清單／表格，以及貼上、拖放圖片內嵌；匯出新增「複製（可貼 Google Docs，含格式與圖片）」，存 HTML、Word、PDF 皆保留圖片。開啟舊日報時自動把 Markdown／categories 資料惰性轉為 HTML，全文搜尋會去除 HTML 標籤與 base64 再比對，匯入亦相容各世代舊備份 JSON。
+- **儲存庫整合可新增多個來源**：GitHub 與 Azure DevOps 由寫死的單例改為可任意新增多筆的來源清單（同型別也可多筆，例如公司＋個人 GitHub），各來源可獨立啟用與測試連線；「從 Git 草擬」會合併所有已啟用來源。每筆來源的 token/PAT 各自存 OS keychain、不隨備份匯出。
+
+### 變更
+
+- **舊資料自動遷移**：更新後首次啟動會偵測舊 identifier（`com.richitech.dailylogs`）資料庫並非破壞性合併（只補缺的日期／設定，旗標確保只跑一次）；舊版 `github_*`／`azure_*` 整合設定與明文 token/PAT 也會一次性遷移為兩筆來源。
+
+## [2.8.1] - 2026-07-20
+
+### 修正
+
+- **自動更新的 `latest.json` 未隨 Release 發佈**：`productName` 含中文與空白導致 GitHub asset 檔名被淨化後與 CI 比對不符，更新資訊檔一直被跳過上傳，自動更新端點 404。`productName` 改為 `DailyLogs`（視窗標題不變，仍為「日報告 DailyLogs」；作業系統的應用程式清單、安裝檔檔名改顯示 `DailyLogs`）。
+- **更新包簽章金鑰更換**：原簽章私鑰與密碼不符導致 CI 簽章失敗，已重新產生金鑰對；v2.8.0 的更新包簽章即以新金鑰簽發。
+
+## [2.8.0] - 2026-07-20
+
+### 新增
+
+- **自動更新**：整合 Tauri updater，App 啟動時背景檢查 GitHub Release 是否有新版本，發現後跳出詢問對話框，同意即下載安裝並自動重啟；設定頁「關於」區段新增「檢查更新」按鈕可手動檢查。更新包以 minisign 簽章驗證（金鑰存 repo secrets，CI 打包時自動簽章並產出 `latest.json`）。含本功能的這一版仍需手動安裝，自動更新自下一版起生效。
+
+## [2.7.0] - 2026-07-16
+
+### 新增
+
+- **多提供者儲存庫整合**：設定頁「GitHub 整合」擴充為「儲存庫整合」，GitHub 與 Azure DevOps（含企業內 TFS/ADS，雲端填 `https://dev.azure.com` + 組織名）可同時啟用；「從 Git 草擬」與工作面板「匯入專案/儲存庫」會合併所有已啟用來源，單一來源失敗（例如在家連不到公司 TFS）只提示警告、不影響其他來源。各來源可獨立測試連線；Azure PAT 與 GitHub token 一樣存 OS keychain、不隨備份匯出（舊版 `tfs_pat` 明文會自動搬移）。
+- **看板檢視**：工作面板新增「看板」頁簽，卡片可拖曳換狀態欄；「已完成」欄預設只顯示最近 7 天完成的項目。
+- **AI 敏捷拆解**：AI 拆解工項改用敏捷模板，產出使用者故事（含驗收條件、技術任務）。
+- **PDF 匯入**：AI 拆解面板的「匯入檔案」支援 `.pdf`（萃取文字層；掃描影像檔會提示無法擷取）。
+- **App logo 與各平台圖示**：新增應用程式圖示。
+- **版本號顯示**：Sidebar 底部與設定頁「關於」區段顯示目前 App 版本。
+
+### 修正
+
+- **Windows 下 AI CLI 讀不到 prompt**：Windows 改以命令列參數傳遞 prompt 給 AI CLI（Unix 維持 stdin），修正部分 CLI 讀取 piped stdin 不可靠導致無回應的問題。
+- **Windows 看板卡片無法拖曳**：關閉 WebView 原生 dragDrop 攔截（`dragDropEnabled: false`）。
+
+### 變更
+
+- 捲軸配色跟隨主題（淺色 slate-300/400、深色 slate-600/500）。
+- **應用程式識別碼改為 `com.arieschao.dailylogs`**：本機資料目錄與 keychain 名稱隨之變更——從舊版升級時，請把舊資料目錄（`%APPDATA%\com.richitech.dailylogs` / `~/Library/Application Support/com.richitech.dailylogs`）內容複製到新目錄，並重填一次整合 token/PAT。
+
 ## [2.4.0] - 2026-07-02
 
 ### 新增

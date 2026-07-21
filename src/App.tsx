@@ -6,7 +6,9 @@ import WeeklyView from "./views/WeeklyView";
 import WorkView from "./views/WorkView";
 import { emptyReport, type Report, type ReportMeta, type SearchHit, type Task } from "./types";
 import { todayStr } from "./lib/format";
+import { markdownToHtml, looksLikeHtml } from "./lib/html";
 import { toastError } from "./lib/toast";
+import { checkForUpdates } from "./lib/updater";
 import Toaster from "./components/Toaster";
 import * as api from "./lib/api";
 import {
@@ -99,7 +101,13 @@ export default function App() {
           } catch {
             template = "";
           }
-          setReport(template.trim() ? { ...emptyReport(date), raw_notes: template } : emptyReport(date));
+          // raw_notes 現為 HTML；範本若為舊 Markdown 先轉成 HTML
+          const notes = template.trim()
+            ? looksLikeHtml(template)
+              ? template
+              : markdownToHtml(template)
+            : "";
+          setReport(notes ? { ...emptyReport(date), raw_notes: notes } : emptyReport(date));
         }
         setTags(await api.getReportTags(date));
         setView("editor");
@@ -118,6 +126,12 @@ export default function App() {
       await openDate(todayStr());
     })();
   }, [refreshList, refreshTasks, openDate]);
+
+  // 初次載入：背景檢查更新（dev 未打包必然失敗，跳過）
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    checkForUpdates({ silent: true });
+  }, []);
 
   // 初次載入：套用已存的主題設定（主色 + 模式；模式的套用交給下方 effect）
   useEffect(() => {

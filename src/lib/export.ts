@@ -1,96 +1,62 @@
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Document, Packer, Paragraph, HeadingLevel, TextRun } from "docx";
-import { renderToStaticMarkup } from "react-dom/server";
-import { createElement } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { type Report } from "../types";
-import { markdownToPlain } from "./format";
+import { htmlToPlain, markdownToHtml } from "./html";
 
-const CJK_FONT = "Microsoft JhengHei";
-
-/** 複製純文字到剪貼簿（給通訊軟體貼上） */
+/** 複製純文字到剪貼簿（給通訊軟體貼上）：raw_notes 為 HTML，去標籤 */
 export async function copyPlainText(report: Report): Promise<void> {
-  await writeText(markdownToPlain(report.raw_notes));
+  await writeText(htmlToPlain(report.raw_notes));
 }
 
-/** 複製 Markdown 到剪貼簿 */
-export async function copyMarkdown(report: Report): Promise<void> {
-  await writeText(report.raw_notes);
+/** 複製富文本（含格式與圖片）到剪貼簿：貼進 Google Docs / Word 會保留排版與圖片 */
+export async function copyRich(report: Report): Promise<void> {
+  const html = report.raw_notes;
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      "text/html": new Blob([html], { type: "text/html" }),
+      "text/plain": new Blob([htmlToPlain(html)], { type: "text/plain" }),
+    }),
+  ]);
 }
 
-/** 匯出 Markdown 檔 */
-export async function exportMarkdown(report: Report): Promise<boolean> {
+/** 匯出自包含 HTML 檔（base64 圖片內嵌） */
+export async function exportHtml(report: Report): Promise<boolean> {
+  const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>日報_${report.date}</title><style>${PRINT_STYLE}</style></head><body>${report.raw_notes}</body></html>`;
   const path = await save({
-    defaultPath: `日報_${report.date}.md`,
-    filters: [{ name: "Markdown", extensions: ["md"] }],
+    defaultPath: `日報_${report.date}.html`,
+    filters: [{ name: "HTML", extensions: ["html"] }],
   });
   if (!path) return false;
-  await invoke("write_text_file", { path, contents: report.raw_notes });
+  await invoke("write_text_file", { path, contents: html });
   return true;
 }
 
-const HEADINGS = [
-  HeadingLevel.HEADING_1,
-  HeadingLevel.HEADING_2,
-  HeadingLevel.HEADING_3,
-  HeadingLevel.HEADING_4,
-  HeadingLevel.HEADING_5,
-  HeadingLevel.HEADING_6,
-];
-
-/** 把一行 Markdown 行內語法（**粗體**）拆成 docx TextRun[] */
-function inlineRuns(text: string): TextRun[] {
-  return text
-    .split(/(\*\*.+?\*\*)/g)
-    .filter(Boolean)
-    .map((part) => {
-      const bold = part.startsWith("**") && part.endsWith("**");
-      return new TextRun({ text: bold ? part.slice(2, -2) : part, font: CJK_FONT, bold });
-    });
+/** 組出 Word 可開啟的 HTML 文件（保留排版與 base64 圖片） */
+function wordHtml(title: string, bodyHtml: string): string {
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>${title}</title>
+<style>@page { size: A4; margin: 2cm; }
+body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; line-height:1.7; }
+img { max-width:100%; }
+table { border-collapse: collapse; }
+td, th { border: 1px solid #999; padding: 4px 8px; }</style></head>
+<body>${bodyHtml}</body></html>`;
 }
 
-/** 把 Markdown 原文逐行轉成 docx 段落 */
-function markdownToParagraphs(md: string): Paragraph[] {
-  const paras: Paragraph[] = [];
-  for (const raw of md.split("\n")) {
-    const heading = raw.match(/^(#{1,6})\s+(.*)$/);
-    if (heading) {
-      paras.push(
-        new Paragraph({ heading: HEADINGS[heading[1].length - 1], children: inlineRuns(heading[2]) }),
-      );
-      continue;
-    }
-    const bullet = raw.match(/^(\s*)[-*]\s+(.*)$/);
-    if (bullet) {
-      paras.push(
-        new Paragraph({ bullet: { level: Math.floor(bullet[1].length / 2) }, children: inlineRuns(bullet[2]) }),
-      );
-      continue;
-    }
-    if (raw.trim()) paras.push(new Paragraph({ children: inlineRuns(raw) }));
-  }
-  return paras;
-}
-
-/** 匯出 Word (.docx)：由 Markdown 原文產生 */
+/** 匯出 Word：輸出 Word 相容 HTML（.doc），保留排版與內嵌圖片 */
 export async function exportDocx(report: Report): Promise<boolean> {
-  const doc = new Document({ sections: [{ children: markdownToParagraphs(report.raw_notes) }] });
-  const blob = await Packer.toBlob(doc);
-  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-
   const path = await save({
-    defaultPath: `日報_${report.date}.docx`,
-    filters: [{ name: "Word", extensions: ["docx"] }],
+    defaultPath: `日報_${report.date}.doc`,
+    filters: [{ name: "Word", extensions: ["doc"] }],
   });
   if (!path) return false;
-  await invoke("write_binary_file", { path, bytes });
+  await invoke("write_text_file", { path, contents: wordHtml(`日報_${report.date}`, report.raw_notes) });
   return true;
 }
 
-/** 共用樣式（PDF 列印用） */
+/** 共用樣式（HTML / PDF 列印用） */
 const PRINT_STYLE = `
   body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; color:#1e293b; padding:32px; line-height:1.7; }
   h1 { font-size:22px; border-bottom:2px solid #0284c7; padding-bottom:8px; }
@@ -99,7 +65,10 @@ const PRINT_STYLE = `
   h4 { font-size:13px; color:#334155; margin:10px 0 2px; }
   ul { margin:2px 0 0; padding-left:20px; }
   li { margin:2px 0; }
-  strong { color:#0369a1; }`;
+  strong { color:#0369a1; }
+  img { max-width:100%; }
+  table { border-collapse: collapse; }
+  td, th { border:1px solid #cbd5e1; padding:4px 8px; }`;
 
 /** 把一段 body HTML 丟進隱藏 iframe 並開系統列印對話框（可存成 PDF；繼承系統字型，中文不亂碼） */
 export function printHtml(title: string, bodyHtml: string): void {
@@ -122,17 +91,14 @@ export function printHtml(title: string, bodyHtml: string): void {
   }, 250);
 }
 
-/** 把 Markdown 原文轉成 HTML 後開系統列印對話框（可存成 PDF） */
+/** 把 Markdown 原文轉成 HTML 後開系統列印對話框（給彙整報告用） */
 export function printMarkdown(title: string, md: string): void {
-  const html = renderToStaticMarkup(
-    createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, md),
-  );
-  printHtml(title, html);
+  printHtml(title, markdownToHtml(md));
 }
 
-/** 匯出 PDF：把 Markdown 原文轉成 HTML 後列印 */
+/** 匯出 PDF：raw_notes 本身即 HTML，直接列印 */
 export function exportPdf(report: Report): void {
-  printMarkdown(`日報_${report.date}`, report.raw_notes);
+  printHtml(`日報_${report.date}`, report.raw_notes);
 }
 
 /** 複製任意文字到剪貼簿 */

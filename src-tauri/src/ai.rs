@@ -1,9 +1,15 @@
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(not(windows))]
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// 以子行程呼叫設定好的 AI CLI，prompt 經 stdin 傳入，回傳 stdout。
+/// 以子行程呼叫設定好的 AI CLI，回傳 stdout。
+///
+/// prompt 傳遞方式依平台不同：Unix 經 stdin 傳入；Windows 因常見 CLI（claude、agy…）
+/// 讀 piped stdin 不可靠，改附加為最後一個命令列參數（命令請填 `claude -p` / `agy -p`，
+/// 勿加 `-`）。
 ///
 /// `command_template` 例：`claude -p`、`codex exec`、或含空白的完整路徑
 /// `"/home/aries/my tools/claude" -p`。以 shell 語法解析（支援引號），不經 shell 執行，避免注入。
@@ -16,18 +22,27 @@ pub fn run_ai(command_template: &str, prompt: &str, timeout_secs: u64) -> Result
         .ok_or_else(|| "尚未設定 AI 命令（請到設定頁填入，例如 claude -p）".to_string())?;
 
     let mut cmd = Command::new(program);
-    cmd.args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    // Windows：避免每次呼叫 CLI 都彈出 console 視窗（CREATE_NO_WINDOW）
+    // Windows：prompt 附加為最後一個參數、stdin 給 EOF（見上方 doc comment）；
+    // 並避免每次呼叫 CLI 都彈出 console 視窗（CREATE_NO_WINDOW）
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        // 命令列總長上限 32767 UTF-16 字元，超過會 spawn 失敗，先擋下給明確錯誤
+        if prompt.encode_utf16().count() > 30_000 {
+            return Err(
+                "內容過長，超過 Windows 命令列長度上限，請縮小日期範圍或內容再試".to_string(),
+            );
+        }
+        cmd.arg(prompt)
+            .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
     }
+    #[cfg(not(windows))]
+    cmd.stdin(Stdio::piped());
 
     let mut child = cmd.spawn().map_err(|e| {
         format!(
@@ -36,7 +51,8 @@ pub fn run_ai(command_template: &str, prompt: &str, timeout_secs: u64) -> Result
         )
     })?;
 
-    // 寫入 prompt 後關閉 stdin（drop），讓 CLI 收到 EOF 開始處理
+    // Unix：寫入 prompt 後關閉 stdin（drop），讓 CLI 收到 EOF 開始處理
+    #[cfg(not(windows))]
     {
         let mut stdin = child
             .stdin
@@ -96,4 +112,16 @@ pub fn run_ai(command_template: &str, prompt: &str, timeout_secs: u64) -> Result
     }
 
     Ok(String::from_utf8_lossy(&out).trim().to_string())
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+
+    /// Unix 路徑：prompt 應經 stdin 傳入子行程，stdout 原樣回傳
+    #[test]
+    fn unix_prompt_經_stdin_往返() {
+        let out = run_ai("cat", "hello 日報", 10).unwrap();
+        assert_eq!(out, "hello 日報");
+    }
 }

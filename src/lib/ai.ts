@@ -1,9 +1,10 @@
 import { type Report, type Task, TASK_STATUS_LABELS } from "../types";
 import { runAi } from "./api";
+import { htmlToPlain, markdownToHtml } from "./html";
 
-/** 取得目前日報的 Markdown 原文（給 AI 當輸入） */
+/** 取得目前日報的純文字（raw_notes 為 HTML，去標籤後給 AI 當輸入） */
 function draftText(report: Report): string {
-  return report.raw_notes.trim() || "（目前沒有內容）";
+  return htmlToPlain(report.raw_notes).trim() || "（目前沒有內容）";
 }
 
 /** 要求 AI 嚴格輸出的「分類為主 + 面向條列」格式說明 */
@@ -35,7 +36,7 @@ const FORMAT_RULE = `請「只」輸出以「專案（大類）> 子分類 > 四
 - 每個項目自成一行、以「- 」開頭，用語精簡專業。
 - 依專案歸納；若實在無法判斷專案，可只用一個專案名涵蓋。`;
 
-/** 零散記事 + 草稿 + 工作面板工項 → 分類為主的日報（回傳 Markdown 文字） */
+/** 零散記事 + 草稿 + 工作面板工項 → 分類為主的日報（AI 輸出 Markdown，轉成 HTML 回傳） */
 export async function organizeReport(
   report: Report,
   tasks: Task[],
@@ -81,10 +82,10 @@ ${FORMAT_RULE}
 
 【零散記事 / 草稿】
 ${draftText(report)}${taskBlock}`;
-  return (await runAi(prompt)).trim();
+  return markdownToHtml((await runAi(prompt)).trim());
 }
 
-/** 潤稿：保留內容只修語氣與錯字（回傳 Markdown 文字） */
+/** 潤稿：保留內容只修語氣與錯字（AI 輸出 Markdown，轉成 HTML 回傳） */
 export async function polishReport(report: Report): Promise<string> {
   const prompt = `請將以下「分類為主」的工作日報潤飾成一份「主管讀了不會想追問或挑語病」的版本。修正錯字與語氣，並在「保留原本的事實、分類與重點」的前提下調整用詞，不要新增或刪除實質內容。
 
@@ -99,7 +100,7 @@ ${FORMAT_RULE}
 
 【目前日報】
 ${draftText(report)}`;
-  return (await runAi(prompt)).trim();
+  return markdownToHtml((await runAi(prompt)).trim());
 }
 
 /** 把多份日報彙整成週報/月報（回傳 Markdown 文字） */
@@ -108,7 +109,7 @@ export async function summarizeRange(
   rangeLabel: string,
 ): Promise<string> {
   const daily = reports
-    .map((r) => `【${r.date}】\n${r.raw_notes.trim() || "（無內容）"}`)
+    .map((r) => `【${r.date}】\n${htmlToPlain(r.raw_notes).trim() || "（無內容）"}`)
     .join("\n\n");
 
   const prompt = `以下是我在「${rangeLabel}」期間每天的工作日報。請彙整成一份給主管看的「工作週報/月報」。
@@ -172,18 +173,32 @@ export function parseTaskDrafts(raw: string): TaskDraft[] {
 }
 
 /**
- * 把一段工作描述/文件內容拆成多筆可獨立執行的工項（每筆含標題 + 細節），
- * 回傳草稿陣列。AI 輸出無法解析或為空則丟出錯誤。
+ * 把一段工作描述/文件內容依敏捷開發模板拆成多筆使用者故事
+ * （每筆含標題 + 使用者故事/驗收條件），回傳草稿陣列。
+ * AI 輸出無法解析或為空則丟出錯誤。
  */
 export async function breakdownToTasks(input: string): Promise<TaskDraft[]> {
-  const prompt = `請把以下這段工作描述（可能是一個大任務，或一份文件/筆記）拆解成數筆「可以各自獨立執行、追蹤的工作項目」。
+  const prompt = `請以敏捷開發（Agile）的方式，把以下這段工作描述（可能是一個大任務，或一份文件/筆記）拆解成數筆「使用者故事（User Story）」，每筆都要可以各自獨立交付、驗收與追蹤。
 
 要求：
-- 每筆工項給一個精簡具體的「標題」，與一段「細節說明」（notes，可含要做的步驟、驗收要點或注意事項）。
-- 依執行先後或重要性排序；粒度適中，不要細到瑣碎、也不要籠統到無法執行。
-- 只根據提供的內容拆解，不要臆測或杜撰未提及的工作。
+- 每筆的「標題」（title）是精簡具體的功能名稱（例如「會員登入」），不要塞完整故事句。
+- 每筆的「細節」（notes）用以下 Markdown 模板撰寫：
+
+**使用者故事**
+身為<角色>，我想要<功能>，以便<價值>。
+
+**驗收條件**
+- Given <前提>，When <操作>，Then <結果>
+- （2-4 條，涵蓋主要情境與例外）
+
+**技術任務**
+- （實作上要做的事，條列；沒有明確技術細節可省略此段）
+
+- 純技術性工作（重構、環境建置等）難以套使用者故事句型時，notes 可只寫「**目標**」一段說明加「**驗收條件**」。
+- 依執行先後或重要性排序；粒度以「可獨立交付驗收的功能切片」為準，不要細到瑣碎、也不要籠統到無法執行。
+- 只根據提供的內容拆解，不要臆測或杜撰未提及的工作；角色與價值不明確時用合理的一般使用者描述，不要捏造細節。
 - 用繁體中文。
-- 「只」輸出一個 JSON 陣列，格式為 [{"title": "...", "notes": "..."}]，不要任何前言、結語、說明或程式碼框（不要 \`\`\`）。
+- 「只」輸出一個 JSON 陣列，格式為 [{"title": "...", "notes": "..."}]（notes 內換行用 \\n），不要任何前言、結語、說明或程式碼框（不要 \`\`\`）。
 
 【工作描述】
 ${input.trim()}`;

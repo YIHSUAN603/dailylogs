@@ -23,10 +23,21 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
     try {
       const path = await open({
         multiple: false,
-        filters: [{ name: "文字 / Markdown", extensions: ["md", "txt"] }],
+        filters: [{ name: "文字 / Markdown / PDF", extensions: ["md", "txt", "pdf"] }],
       });
       if (typeof path !== "string") return;
-      setInput(await api.readTextFile(path));
+      if (path.toLowerCase().endsWith(".pdf")) {
+        // pdfjs 較大，用動態載入避免拖慢啟動
+        const { extractPdfText } = await import("../lib/pdf");
+        const text = await extractPdfText(await api.readBinaryFile(path));
+        if (!text) {
+          toastError("這份 PDF 沒有可擷取的文字（可能是掃描影像檔）");
+          return;
+        }
+        setInput(text);
+      } else {
+        setInput(await api.readTextFile(path));
+      }
     } catch (e) {
       toastError(`讀取檔案失敗：${e}`);
     }
@@ -104,7 +115,7 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="貼上或打一段工作描述（例：做一個登入頁），或用「匯入檔案」載入 .md / .txt，AI 會拆成多筆工項。"
+            placeholder="貼上或打一段工作描述（例：做一個登入頁），或用「匯入檔案」載入 .md / .txt / .pdf，AI 會依敏捷模板拆成多筆使用者故事（含驗收條件）。"
             rows={6}
             autoFocus
             className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
@@ -192,7 +203,7 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
                   <textarea
                     value={d.notes}
                     onChange={(e) => patch(i, { notes: e.target.value })}
-                    placeholder="細節 / 驗收要點（可空）"
+                    placeholder="使用者故事 / 驗收條件（可空）"
                     rows={3}
                     className="w-full resize-y rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                   />
