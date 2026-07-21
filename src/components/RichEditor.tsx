@@ -1,15 +1,18 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useEditor, useEditorState, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Image from "@tiptap/extension-image";
+import { ResizableImage } from "./ResizableImage";
 import { TableKit } from "@tiptap/extension-table";
 import TextAlign from "@tiptap/extension-text-align";
 import { Placeholder } from "@tiptap/extensions";
+import { DOMSerializer } from "@tiptap/pm/model";
+import { cleanForDocs, htmlToPlain } from "../lib/html";
 import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough,
   Heading1, Heading2, Heading3, List, ListOrdered, Quote,
   AlignLeft, AlignCenter, AlignRight, Link as LinkIcon,
   Image as ImageIcon, Table as TableIcon, Eraser,
+  Code, SquareCode,
 } from "lucide-react";
 
 interface Props {
@@ -43,7 +46,7 @@ export default function RichEditor({ value, onChange, placeholder }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
-      Image,
+      ResizableImage,
       TableKit.configure({ table: { resizable: true } }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Placeholder.configure({ placeholder: placeholder ?? "" }),
@@ -55,6 +58,23 @@ export default function RichEditor({ value, onChange, placeholder }: Props) {
       },
       handlePaste: (_view, event) => handleFiles(event.clipboardData?.files, event),
       handleDrop: (_view, event) => handleFiles((event as DragEvent).dataTransfer?.files, event),
+      // 手動框選 Ctrl+C：也轉成巢狀項目清單，貼進 Google Docs 才 fit（同「複製」按鈕）
+      handleDOMEvents: {
+        copy: (view, event) => {
+          const { selection, schema } = view.state;
+          if (selection.empty) return false;
+          const cd = (event as ClipboardEvent).clipboardData;
+          if (!cd) return false;
+          const frag = DOMSerializer.fromSchema(schema).serializeFragment(selection.content().content);
+          const holder = document.createElement("div");
+          holder.appendChild(frag);
+          const cleaned = cleanForDocs(holder.innerHTML);
+          cd.setData("text/html", cleaned);
+          cd.setData("text/plain", htmlToPlain(cleaned).replace(/\n{2,}/g, "\n"));
+          event.preventDefault();
+          return true;
+        },
+      },
     },
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
   });
@@ -83,6 +103,8 @@ export default function RichEditor({ value, onChange, placeholder }: Props) {
             bullet: editor.isActive("bulletList"),
             ordered: editor.isActive("orderedList"),
             quote: editor.isActive("blockquote"),
+            code: editor.isActive("code"),
+            codeBlock: editor.isActive("codeBlock"),
             left: editor.isActive({ textAlign: "left" }),
             center: editor.isActive({ textAlign: "center" }),
             right: editor.isActive({ textAlign: "right" }),
@@ -130,6 +152,8 @@ export default function RichEditor({ value, onChange, placeholder }: Props) {
         <Btn active={s?.bullet} title="項目清單" onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={16} /></Btn>
         <Btn active={s?.ordered} title="編號清單" onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered size={16} /></Btn>
         <Btn active={s?.quote} title="引用" onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote size={16} /></Btn>
+        <Btn active={s?.code} title="行內程式碼" onClick={() => editor.chain().focus().toggleCode().run()}><Code size={16} /></Btn>
+        <Btn active={s?.codeBlock} title="程式碼區塊" onClick={() => editor.chain().focus().toggleCodeBlock().run()}><SquareCode size={16} /></Btn>
         <Sep />
         <Btn active={s?.left} title="靠左" onClick={() => editor.chain().focus().setTextAlign("left").run()}><AlignLeft size={16} /></Btn>
         <Btn active={s?.center} title="置中" onClick={() => editor.chain().focus().setTextAlign("center").run()}><AlignCenter size={16} /></Btn>

@@ -46,6 +46,38 @@ function serialize(node: Node, out: string[]): void {
   });
 }
 
+/**
+ * 清理 HTML 以便貼進團隊 Google Docs：保留標題（H2 專案／H3 功能）與巢狀清單結構，
+ * 只移除會讓 Google Docs 產生「空白項目符號」的東西——
+ * 拆掉 <li> 內的 <p> 包裝、刪除空的清單項與空段落。保留粗體/連結/行內程式碼/圖片（含尺寸）。
+ */
+export function cleanForDocs(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  // 1. 拆掉 <li> 的直接子 <p>（Tiptap 會包 <p>，貼進 Docs 會多出空白項目）；多段以 <br> 相接
+  doc.querySelectorAll("li").forEach((li) => {
+    Array.from(li.children)
+      .filter((c) => c.tagName === "P")
+      .forEach((p, idx) => {
+        if (idx > 0) li.insertBefore(doc.createElement("br"), p);
+        while (p.firstChild) li.insertBefore(p.firstChild, p);
+        p.remove();
+      });
+  });
+
+  // 2. 移除空的清單項（沒有文字、圖片、也沒有子清單）
+  doc.querySelectorAll("li").forEach((li) => {
+    if (!li.textContent?.trim() && !li.querySelector("img, ul, ol, table")) li.remove();
+  });
+
+  // 3. 移除空段落與空標題
+  doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6").forEach((el) => {
+    if (!el.textContent?.trim() && !el.querySelector("img")) el.remove();
+  });
+
+  return doc.body.innerHTML;
+}
+
 /** HTML → 純文字：給純文字複製、AI 輸入、搜尋片段用（圖片以「[圖片]」標示，不含 base64） */
 export function htmlToPlain(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");

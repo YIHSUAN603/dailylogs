@@ -2,20 +2,46 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { save } from "@tauri-apps/plugin-dialog";
 import { type Report } from "../types";
-import { htmlToPlain, markdownToHtml } from "./html";
+import { htmlToPlain, cleanForDocs, markdownToHtml } from "./html";
 
 /** 複製純文字到剪貼簿（給通訊軟體貼上）：raw_notes 為 HTML，去標籤 */
 export async function copyPlainText(report: Report): Promise<void> {
   await writeText(htmlToPlain(report.raw_notes));
 }
 
-/** 複製富文本（含格式與圖片）到剪貼簿：貼進 Google Docs / Word 會保留排版與圖片 */
+/**
+ * 以同步 copy 事件寫入富文本剪貼簿（text/html + text/plain）。
+ * 比 navigator.clipboard.write 相容性更好：WebKitGTK（Tauri Linux/WSL）對非同步 API 的 text/html
+ * 支援不穩，同步 copy 事件的 setData 才可靠。回傳是否成功。
+ */
+function writeRichClipboard(html: string, plain: string): boolean {
+  let ok = false;
+  const onCopy = (e: ClipboardEvent) => {
+    e.clipboardData?.setData("text/html", html);
+    e.clipboardData?.setData("text/plain", plain);
+    e.preventDefault();
+    ok = true;
+  };
+  document.addEventListener("copy", onCopy);
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.removeEventListener("copy", onCopy);
+  }
+  return ok;
+}
+
+/** 複製富文本（含格式與圖片）到剪貼簿：清理成 Google Docs 友善的標題+巢狀清單（保留排版與圖片） */
 export async function copyRich(report: Report): Promise<void> {
-  const html = report.raw_notes;
+  const html = cleanForDocs(report.raw_notes);
+  // 純文字 fallback（有些剪貼簿路徑如 WSLg 只帶 text/plain）：去掉多餘空白行
+  const plain = htmlToPlain(html).replace(/\n{2,}/g, "\n");
+  // 優先用同步 copy 事件（WebKitGTK 對 text/html 較可靠），失敗再退回非同步 API
+  if (writeRichClipboard(html, plain)) return;
   await navigator.clipboard.write([
     new ClipboardItem({
       "text/html": new Blob([html], { type: "text/html" }),
-      "text/plain": new Blob([htmlToPlain(html)], { type: "text/plain" }),
+      "text/plain": new Blob([plain], { type: "text/plain" }),
     }),
   ]);
 }
