@@ -182,7 +182,10 @@ export default function ReportEditor({ report, saving, tags, tasks, dark, onChan
             const { text: commits, warnings } = await api.collectCommits(report.date);
             // 部分提供者失敗（例如在家連不到公司 TFS）：提示但不中斷另一邊的結果
             warnings.forEach((w) => toastError(`部分來源失敗：${w}`));
-            if (!commits) throw new Error("今天沒有符合的 commit");
+            if (!commits)
+              throw new Error(
+                "今天沒有符合的 commit（若確定有，請檢查該來源的「作者關鍵字」是否與你的 commit 作者／帳號／email 相符）",
+              );
             const existing = report.raw_notes.trim();
             if (!existing) {
               applyIfCurrent(() => onChange({ raw_notes: markdownToHtml(commits) }));

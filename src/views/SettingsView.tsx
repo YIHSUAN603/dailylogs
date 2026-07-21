@@ -73,12 +73,15 @@ export default function SettingsView({ onClose, accent, mode, onAccentChange, on
   const loadRepoSettings = async () => {
     const raw = await getSetting(REPO_PROVIDERS_KEY);
     const list: RepoProvider[] = raw ? JSON.parse(raw) : [];
-    setProviders(list);
-    setNewlyAdded(new Set());
+    // 先撈齊秘密再設 providers：卡片以 useState(initialSecret) 只在掛載當下讀一次秘密，
+    // 若 providers 先設好、秘密還沒到，卡片會抓到空字串且之後不再同步，之後任何存檔
+    //（含切換啟用）就會把空字串覆蓋回去、清掉 PAT。
     const entries = await Promise.all(
       list.map(async (p) => [p.id, await getProviderSecret(p.id)] as const),
     );
     setProviderSecrets(Object.fromEntries(entries));
+    setNewlyAdded(new Set());
+    setProviders(list);
   };
 
   // 把整份清單寫回 DB

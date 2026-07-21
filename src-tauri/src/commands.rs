@@ -404,7 +404,13 @@ pub async fn repo_collect_commits(
             Err(e) => Err(e),
         };
         match result {
-            Ok(mut v) => {
+            Ok((mut v, on_date_total)) => {
+                // 當天其實有 commit、卻被作者關鍵字全數濾光：給出可行動的診斷
+                if v.is_empty() && on_date_total > 0 {
+                    warnings.push(format!(
+                        "{name}：今天有 {on_date_total} 筆 commit，但無一符合作者關鍵字，請檢查該來源的「作者關鍵字」設定"
+                    ));
+                }
                 all.append(&mut v);
                 succeeded = true;
             }

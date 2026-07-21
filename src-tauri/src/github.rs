@@ -199,7 +199,12 @@ pub async fn count_repos(cfg: &GithubConfig) -> Result<usize, String> {
 }
 
 /// 掃描所有 owner 的 repo，取出指定日期（當地時間）該作者的 commit 標題。
-pub async fn collect_commits(cfg: &GithubConfig, date: &str) -> Result<Vec<RepoCommits>, String> {
+/// 回傳 (符合的 commit 分組, 當天在過作者過濾前的 commit 總數)，後者供呼叫端在
+/// 「有 commit 但都不符作者」時給出診斷訊息。
+pub async fn collect_commits(
+    cfg: &GithubConfig,
+    date: &str,
+) -> Result<(Vec<RepoCommits>, usize), String> {
     let target =
         NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| format!("日期格式錯誤：{date}"))?;
     // 拉寬到目標日 ±1 天（UTC），再用本機時區精準濾出當天，避開時區邊界
@@ -225,6 +230,7 @@ pub async fn collect_commits(cfg: &GithubConfig, date: &str) -> Result<Vec<RepoC
     }
 
     let mut result: Vec<RepoCommits> = Vec::new();
+    let mut on_date_total = 0usize;
     for chunk in flat.chunks(CONCURRENCY) {
         let futs = chunk.iter().map(|(owner, name)| {
             let client = &client;
@@ -237,9 +243,14 @@ pub async fn collect_commits(cfg: &GithubConfig, date: &str) -> Result<Vec<RepoC
             }
         });
         for (owner, name, items) in futures::future::join_all(futs).await {
-            let commits: Vec<String> = items
+            // 先取當天的 commit（不分作者）計數，再套作者過濾
+            let on_date: Vec<CommitItem> = items
                 .into_iter()
                 .filter(|c| commit_on_date(c, target))
+                .collect();
+            on_date_total += on_date.len();
+            let commits: Vec<String> = on_date
+                .into_iter()
                 .filter(|c| author_matches(c, &cfg.authors))
                 .filter_map(|c| {
                     c.commit
@@ -265,7 +276,7 @@ pub async fn collect_commits(cfg: &GithubConfig, date: &str) -> Result<Vec<RepoC
     }
     // 先依 owner、再依 repo 排序，讓 format_commits 可用「連續同 owner」分組
     result.sort_by(|a, b| a.project.cmp(&b.project).then_with(|| a.repo.cmp(&b.repo)));
-    Ok(result)
+    Ok((result, on_date_total))
 }
 
 /// commit 的作者時間（UTC ISO8601）轉本機時區後，日期是否等於目標日
