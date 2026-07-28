@@ -142,6 +142,12 @@ function taskLine(t: Task): string {
 export interface TaskDraft {
   title: string;
   notes: string;
+  due_date: string | null; // YYYY-MM-DD；AI 未排程則 null
+}
+
+/** 只認 YYYY-MM-DD，其他一律當沒排程 */
+function parseDueDate(v: unknown): string | null {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : null;
 }
 
 /** 從 AI 回應中解析出工項草稿：先試 JSON 陣列，失敗則退回逐行抓條列 */
@@ -158,6 +164,7 @@ export function parseTaskDrafts(raw: string): TaskDraft[] {
             (o): TaskDraft => ({
               title: typeof o?.title === "string" ? o.title.trim() : "",
               notes: typeof o?.notes === "string" ? o.notes.trim() : "",
+              due_date: parseDueDate(o?.due_date),
             }),
           )
           .filter((d) => d.title);
@@ -172,16 +179,26 @@ export function parseTaskDrafts(raw: string): TaskDraft[] {
     .split("\n")
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s+/, "").trim())
     .filter(Boolean)
-    .map((title): TaskDraft => ({ title, notes: "" }));
+    .map((title): TaskDraft => ({ title, notes: "", due_date: null }));
   return drafts;
 }
 
 /**
  * 把一段工作描述/文件內容依敏捷開發模板拆成多筆使用者故事
  * （每筆含標題 + 使用者故事/驗收條件），回傳草稿陣列。
+ * 傳入 deadline（YYYY-MM-DD）時，請 AI 依先後順序在 today~deadline 之間排各筆的截止日。
  * AI 輸出無法解析或為空則丟出錯誤。
  */
-export async function breakdownToTasks(input: string): Promise<TaskDraft[]> {
+export async function breakdownToTasks(
+  input: string,
+  deadline?: string,
+  today = new Date().toLocaleDateString("sv-SE"),
+): Promise<TaskDraft[]> {
+  const scheduleRule = deadline
+    ? `- 這批工項的整體截止日是 ${deadline}（今天是 ${today}）。請依你排定的執行先後順序，為「每一筆」工項排一個截止日（due_date，格式 YYYY-MM-DD）：一律落在 ${today} 到 ${deadline} 之間（含兩端），依序遞增（後面的工項不早於前面的），最後一筆不得晚於 ${deadline}；並依各工項的份量分配時間，不要全部塞同一天。測試文件工項的截止日不早於其對應的開發工項。
+`
+    : `- 不要排截止日：每筆的 due_date 一律輸出 null。
+`;
   const prompt = `請以敏捷開發（Agile）的方式，把以下這段工作描述（可能是一個大任務，或一份文件/筆記）拆解成數筆「使用者故事（User Story）」，每筆都要可以各自獨立交付、驗收與追蹤。
 
 要求：
@@ -201,9 +218,10 @@ export async function breakdownToTasks(input: string): Promise<TaskDraft[]> {
 - 純技術性工作（重構、環境建置等）難以套使用者故事句型時，notes 可只寫「**目標**」一段說明加「**驗收條件**」。
 - 若某開發工項屬於需要撰寫測試的功能，請「額外」為它拆出一筆「測試文件」工項（不需要測試的工項就不必產）。測試文件工項的標題格式為「[NN] <對應開發工項的標題>」：NN 是測試文件自己的兩位數流水號，從 01 開始依序遞增（與開發工項的順序無關），標題文字要與其對應的開發工項完全相同（例如開發工項「會員登入」，其測試文件工項標題為「[01] 會員登入」）。測試文件工項的 notes 寫該功能的測試重點與測試案例。
 - 依執行先後或重要性排序；粒度以「可獨立交付驗收的功能切片」為準，不要細到瑣碎、也不要籠統到無法執行。
+${scheduleRule}
 - 只根據提供的內容拆解，不要臆測或杜撰未提及的工作；角色與價值不明確時用合理的一般使用者描述，不要捏造細節。
 - 用繁體中文。
-- 「只」輸出一個 JSON 陣列，格式為 [{"title": "...", "notes": "..."}]（notes 內換行用 \\n），不要任何前言、結語、說明或程式碼框（不要 \`\`\`）。
+- 「只」輸出一個 JSON 陣列，格式為 [{"title": "...", "notes": "...", "due_date": "YYYY-MM-DD 或 null"}]（notes 內換行用 \\n），不要任何前言、結語、說明或程式碼框（不要 \`\`\`）。
 
 【工作描述】
 ${input.trim()}`;

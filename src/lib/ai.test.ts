@@ -5,19 +5,27 @@ describe("parseTaskDrafts", () => {
   it("解析乾淨的 JSON 陣列", () => {
     const out = '[{"title": "做登入頁", "notes": "含驗證"}, {"title": "寫測試", "notes": ""}]';
     expect(parseTaskDrafts(out)).toEqual([
-      { title: "做登入頁", notes: "含驗證" },
-      { title: "寫測試", notes: "" },
+      { title: "做登入頁", notes: "含驗證", due_date: null },
+      { title: "寫測試", notes: "", due_date: null },
     ]);
   });
 
   it("容忍 ```json 包裹與前後多餘文字", () => {
     const out = '好的，以下是拆解結果：\n```json\n[{"title": "A", "notes": "B"}]\n```\n希望有幫助';
-    expect(parseTaskDrafts(out)).toEqual([{ title: "A", notes: "B" }]);
+    expect(parseTaskDrafts(out)).toEqual([{ title: "A", notes: "B", due_date: null }]);
   });
 
   it("過濾掉沒有標題的項目", () => {
     const out = '[{"title": "", "notes": "x"}, {"title": "有效", "notes": ""}]';
-    expect(parseTaskDrafts(out)).toEqual([{ title: "有效", notes: "" }]);
+    expect(parseTaskDrafts(out)).toEqual([{ title: "有效", notes: "", due_date: null }]);
+  });
+
+  it("解析 due_date，格式不對的視為未排程", () => {
+    const out =
+      '[{"title": "A", "notes": "", "due_date": "2026-08-05"},' +
+      '{"title": "B", "notes": "", "due_date": "8/12"},' +
+      '{"title": "C", "notes": "", "due_date": null}]';
+    expect(parseTaskDrafts(out).map((d) => d.due_date)).toEqual(["2026-08-05", null, null]);
   });
 
   it("JSON 解析失敗時退回逐行抓條列", () => {

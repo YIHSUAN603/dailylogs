@@ -5,6 +5,7 @@ import * as api from "../lib/api";
 import * as ai from "../lib/ai";
 import { toastError } from "../lib/toast";
 import ProjectInput from "./ProjectInput";
+import DatePicker from "./DatePicker";
 
 interface Props {
   projects: string[];
@@ -16,6 +17,7 @@ interface Props {
 export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Props) {
   const [input, setInput] = useState("");
   const [defaultProject, setDefaultProject] = useState("");
+  const [deadline, setDeadline] = useState("");
   const [drafts, setDrafts] = useState<Task[] | null>(null);
   const [busy, setBusy] = useState("");
 
@@ -50,12 +52,13 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
     }
     setBusy("拆解中");
     try {
-      const result = await ai.breakdownToTasks(input);
+      const result = await ai.breakdownToTasks(input, deadline || undefined);
       setDrafts(
         result.map((d) => ({
           ...emptyTask(),
           title: d.title,
           notes: d.notes,
+          due_date: d.due_date,
           project: defaultProject.trim(),
         })),
       );
@@ -115,7 +118,7 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="貼上或打一段工作描述（例：做一個登入頁），或用「匯入檔案」載入 .md / .txt / .pdf，AI 會依敏捷模板拆成多筆使用者故事（含驗收條件）。"
+            placeholder="貼上或打一段工作描述（例：做一個登入頁），或用「匯入檔案」載入 .md / .txt / .pdf，AI 會依敏捷模板拆成多筆使用者故事（含驗收條件）。設了整體截止日，AI 會依執行順序幫每筆排截止日。"
             rows={6}
             autoFocus
             className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
@@ -129,6 +132,20 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
                 projects={projects}
                 inputClassName="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 outline-none focus:border-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
               />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+              整體截止日
+              <DatePicker value={deadline} onChange={setDeadline} />
+              {deadline && (
+                <button
+                  type="button"
+                  onClick={() => setDeadline("")}
+                  className="rounded px-1.5 py-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  aria-label="清除整體截止日"
+                >
+                  ✕
+                </button>
+              )}
             </label>
             <button
               onClick={importFile}
@@ -198,6 +215,23 @@ export default function TaskBreakdownPanel({ projects, onCreated, onClose }: Pro
                           </option>
                         ))}
                       </select>
+                    </label>
+                    <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                      截止日
+                      <DatePicker
+                        value={d.due_date ?? ""}
+                        onChange={(v) => patch(i, { due_date: v || null })}
+                      />
+                      {d.due_date && (
+                        <button
+                          type="button"
+                          onClick={() => patch(i, { due_date: null })}
+                          className="rounded px-1.5 py-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                          aria-label="清除截止日"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </label>
                   </div>
                   <textarea
