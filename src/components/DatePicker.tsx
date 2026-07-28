@@ -6,7 +6,7 @@ interface Props {
   onChange: (value: string) => void;
 }
 
-const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 /** YYYY-MM-DD → Date（本地時區），空字串回傳今天 */
 function parse(v: string): Date {
@@ -48,7 +48,7 @@ export default function DatePicker({ value, onChange }: Props) {
 
   const year = view.getFullYear();
   const month = view.getMonth();
-  const startPad = (new Date(year, month, 1).getDay() + 6) % 7; // 週一=0
+  const startPad = new Date(year, month, 1).getDay(); // 週日=0
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells: (number | null)[] = [
     ...Array<null>(startPad).fill(null),
